@@ -3,7 +3,6 @@ import { ActivityIndicator, Platform, Pressable, SafeAreaView, StatusBar, StyleS
 import { LinearGradient } from 'expo-linear-gradient';
 import { StatusBar as ExpoStatusBar } from 'expo-status-bar';
 
-import AuthScreen from './src/screens/AuthScreen';
 import TodayScreen from './src/screens/TodayScreen';
 import PlanScreen from './src/screens/PlanScreen';
 import LibraryScreen from './src/screens/LibraryScreen';
@@ -11,7 +10,7 @@ import ProgressScreen from './src/screens/ProgressScreen';
 import ExerciseDetailScreen from './src/screens/ExerciseDetailScreen';
 import LogSheet from './src/components/LogSheet';
 
-import { supabase } from './src/lib/supabase';
+import { supabase, ensureDemoSession } from './src/lib/supabase';
 import { getExercise } from './src/lib/db';
 import { colors, gradients } from './src/theme';
 
@@ -38,18 +37,57 @@ function BottomNav({ tab, setTab }) {
   );
 }
 
+function StartupError({ message, onRetry }) {
+  return (
+    <View style={styles.errorWrap}>
+      <Text style={styles.errorEmoji}>🏋️</Text>
+      <Text style={styles.errorTitle}>Can’t start the demo</Text>
+      <Text style={styles.errorBody}>{message}</Text>
+      <Pressable onPress={onRetry} style={styles.retry} hitSlop={8}>
+        <Text style={styles.retryText}>Try again</Text>
+      </Pressable>
+    </View>
+  );
+}
+
 export default function App() {
   const [session, setSession] = useState(undefined); // undefined = loading
+  const [authError, setAuthError] = useState('');
   const [tab, setTab] = useState('today');
   const [detail, setDetail] = useState(null);
   const [logging, setLogging] = useState(null);
   const [reload, setReload] = useState(0);
+  const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data }) => setSession(data.session ?? null));
-    const { data: sub } = supabase.auth.onAuthStateChange((_e, s) => setSession(s ?? null));
-    return () => sub.subscription.unsubscribe();
-  }, []);
+    let alive = true;
+    const { data: sub } = supabase.auth.onAuthStateChange((_e, s) => {
+      if (alive && s) setSession(s);
+    });
+
+    setSession(undefined);
+    setAuthError('');
+    ensureDemoSession()
+      .then((s) => {
+        if (!alive) return;
+        setSession(s);
+      })
+      .catch((e) => {
+        if (!alive) return;
+        const raw = String(e?.message || e);
+        setAuthError(
+          /anonymous/i.test(raw)
+            ? 'Anonymous sign-ins are disabled for this Supabase project. Enable them under Authentication → Sign In / Providers, then try again.'
+            : raw,
+        );
+        setSession(null);
+      });
+
+    return () => {
+      alive = false;
+      sub.subscription.unsubscribe();
+    };
+  }, [attempt]);
 
   const openExercise = useCallback((ex) => setDetail(ex), []);
   const openExerciseId = useCallback(async (id) => {
@@ -62,13 +100,13 @@ export default function App() {
   const startLog = useCallback((ex) => setLogging(ex), []);
   const onSaved = useCallback(() => setReload((n) => n + 1), []);
 
-  const signOut = () => supabase.auth.signOut();
-
   const body = () => {
     if (session === undefined) {
       return <ActivityIndicator color={colors.primary} style={{ flex: 1 }} />;
     }
-    if (!session) return <AuthScreen />;
+    if (!session) {
+      return <StartupError message={authError} onRetry={() => setAttempt((n) => n + 1)} />;
+    }
 
     if (detail) {
       return (
@@ -80,9 +118,7 @@ export default function App() {
       <View style={styles.flex}>
         <View style={styles.topbar}>
           <Text style={styles.brand}>Gym Tracker</Text>
-          <Pressable onPress={signOut} hitSlop={8}>
-            <Text style={styles.signout}>Sign out</Text>
-          </Pressable>
+          <Text style={styles.demoBadge}>Demo</Text>
         </View>
         <View style={styles.flex}>
           {tab === 'today' && (
@@ -132,7 +168,45 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
   },
   brand: { color: colors.textDim, fontSize: 13, fontWeight: '800', letterSpacing: 1, textTransform: 'uppercase' },
-  signout: { color: colors.textFaint, fontSize: 13, fontWeight: '700' },
+  demoBadge: {
+    color: colors.textFaint,
+    fontSize: 11,
+    fontWeight: '800',
+    letterSpacing: 1,
+    textTransform: 'uppercase',
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 3,
+    overflow: 'hidden',
+  },
+  errorWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 28 },
+  errorEmoji: { fontSize: 44 },
+  errorTitle: {
+    color: colors.text,
+    fontSize: 20,
+    fontWeight: '900',
+    marginTop: 10,
+    textAlign: 'center',
+  },
+  errorBody: {
+    color: colors.textDim,
+    fontSize: 14,
+    lineHeight: 20,
+    marginTop: 10,
+    textAlign: 'center',
+    maxWidth: 420,
+  },
+  retry: {
+    marginTop: 20,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 999,
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+  },
+  retryText: { color: colors.primary, fontSize: 14, fontWeight: '800' },
   nav: {
     flexDirection: 'row',
     borderTopWidth: 1,
