@@ -1,0 +1,16 @@
+{
+  "expo": {
+    "name": "Gym Tracker",
+    "slug": "gym-tracker",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "dark",
+    "backgroundColor": "#0B0E14",
+    "ios": {
+      "supportsTablet": true
+    },
+    "web": {
+      "bundler": "metro"
+    }
+  }
+}
