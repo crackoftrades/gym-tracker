@@ -17,8 +17,13 @@ Today. Nothing to remember, nothing to type.
 
 What this means in practice:
 
-- Your plan and logs are **private to that device** — the anonymous user id is the
-  owner, and Row Level Security is unchanged, so nobody else can read your rows.
+- Your plan and any workouts you log are **private to that device** — the anonymous
+  user id is the owner, and Row Level Security enforces it.
+- **Three sample workouts are shared with everyone.** They use the same
+  `user_id IS NULL` convention the `exercises` library already uses: the row belongs
+  to nobody, so every visitor can read it, and the insert/update/delete policies
+  (`user_id = auth.uid()`) mean nobody can edit or delete it. New visitors land on a
+  populated app instead of an empty one.
 - The session persists across restarts. Clearing app storage (or a browser's site
   data) starts a fresh, empty account — the old rows are orphaned, not visible.
 - There's no cross-device sync while anonymous. Adding email/password back later is
@@ -54,3 +59,20 @@ Config lives in `.env` (copy from `.env.example`). The Supabase URL and publisha
 ## Database
 
 Tables (all with RLS): `exercises`, `plan_days`, `plan_exercises`, `workout_logs` (sets stored as JSONB). Schema and the seeded exercise library were applied via Supabase migrations.
+
+`exercises` and `workout_logs` both allow `user_id IS NULL` to mean "shared demo
+content, readable by all, writable by none". `plan_days` and `plan_exercises` stay
+strictly per-user — a shared plan that any visitor could delete would be worse than
+no plan.
+
+Anonymous users accumulate with no automatic cleanup, and Supabase rate-limits
+anonymous sign-ins to 30/hour per IP. To reap empty sessions without touching
+anyone's data:
+
+```sql
+delete from auth.users u
+where u.is_anonymous
+  and not exists (select 1 from workout_logs   w where w.user_id = u.id)
+  and not exists (select 1 from plan_days      d where d.user_id = u.id)
+  and not exists (select 1 from plan_exercises e where e.user_id = u.id);
+```
