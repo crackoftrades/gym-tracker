@@ -77,7 +77,7 @@ export async function removePlanExercise(id) {
 }
 
 // ---------- Workout logs ----------
-export async function logWorkout({ exercise, sets, notes, performedOn }) {
+export async function logWorkout({ exercise, sets, notes, performedOn, photoUrl }) {
   const user_id = await uid();
   const row = {
     user_id,
@@ -87,6 +87,7 @@ export async function logWorkout({ exercise, sets, notes, performedOn }) {
     split_day: exercise.split_day,
     sets,
     notes: notes || null,
+    photo_url: photoUrl || null,
   };
   if (performedOn) row.performed_on = performedOn;
   const { data, error } = await supabase.from('workout_logs').insert(row).select().single();

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import Chip from '../components/Chip';
 import Tag from '../components/Tag';
 import { listLogs } from '../lib/db';
@@ -192,6 +192,7 @@ export default function ProgressScreen({ reloadSignal, onOpenExerciseId }) {
         <ScrollView contentContainerStyle={styles.list}>
           {logs.map((l) => (
             <View key={l.id} style={styles.logRow}>
+              {!!l.photo_url && <Image source={{ uri: l.photo_url }} style={styles.logThumb} resizeMode="cover" />}
               <View style={{ flex: 1 }}>
                 <View style={{ flexDirection: 'row', alignItems: 'center' }}>
                   <Text style={styles.logName} numberOfLines={1}>
@@ -298,6 +299,13 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
     padding: 14,
     marginBottom: 10,
+  },
+  logThumb: {
+    width: 44,
+    height: 44,
+    borderRadius: radius.sm,
+    backgroundColor: colors.cardAlt,
+    marginRight: 12,
   },
   logName: { color: colors.text, fontSize: 15, fontWeight: '800' },
   logMeta: { color: colors.textDim, fontSize: 13, marginTop: 3 },

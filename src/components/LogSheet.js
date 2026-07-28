@@ -11,7 +11,9 @@ import {
   View,
 } from 'react-native';
 import Button from './Button';
+import PhotoField from './PhotoField';
 import { lastLogFor, logWorkout } from '../lib/db';
+import { deleteProgressPhoto } from '../lib/storage';
 import { isoDate, prettyDate } from '../lib/metrics';
 import { colors, radius, spacing } from '../theme';
 
@@ -22,6 +24,7 @@ export default function LogSheet({ visible, exercise, onClose, onSaved }) {
   const [sets, setSets] = useState([{ ...blankSet }]);
   const [notes, setNotes] = useState('');
   const [performedOn, setPerformedOn] = useState(isoDate());
+  const [photoUrl, setPhotoUrl] = useState(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [lastHint, setLastHint] = useState('');
@@ -30,6 +33,7 @@ export default function LogSheet({ visible, exercise, onClose, onSaved }) {
     if (!visible || !exercise) return;
     setNotes('');
     setError('');
+    setPhotoUrl(null);
     setPerformedOn(isoDate());
     // Prefill from the most recent session so you just tap "save" or bump the weight.
     lastLogFor(exercise.id)
@@ -60,6 +64,14 @@ export default function LogSheet({ visible, exercise, onClose, onSaved }) {
   };
   const removeSet = (i) => setSets((prev) => (prev.length > 1 ? prev.filter((_, idx) => idx !== i) : prev));
 
+  // Photos upload on pick, so bailing out would otherwise orphan the file.
+  const cancel = () => {
+    if (busy) return;
+    deleteProgressPhoto(photoUrl).catch(() => {});
+    setPhotoUrl(null);
+    onClose?.();
+  };
+
   const save = async () => {
     setError('');
     const clean = sets
@@ -71,7 +83,8 @@ export default function LogSheet({ visible, exercise, onClose, onSaved }) {
     }
     setBusy(true);
     try {
-      await logWorkout({ exercise, sets: clean, notes, performedOn });
+      await logWorkout({ exercise, sets: clean, notes, performedOn, photoUrl });
+      setPhotoUrl(null);
       onSaved?.();
       onClose?.();
     } catch (e) {
@@ -84,9 +97,9 @@ export default function LogSheet({ visible, exercise, onClose, onSaved }) {
   if (!exercise) return null;
 
   return (
-    <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
+    <Modal visible={visible} animationType="slide" transparent onRequestClose={cancel}>
       <View style={styles.backdrop}>
-        <Pressable style={styles.backdropTap} onPress={onClose} />
+        <Pressable style={styles.backdropTap} onPress={cancel} />
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
           <View style={styles.sheet}>
             <View style={styles.handle} />
@@ -149,12 +162,14 @@ export default function LogSheet({ visible, exercise, onClose, onSaved }) {
                 style={[styles.notes, { height: 60 }]}
                 multiline
               />
+
+              <PhotoField value={photoUrl} onChange={setPhotoUrl} onError={setError} />
             </ScrollView>
 
             {!!error && <Text style={styles.error}>{error}</Text>}
 
             <View style={styles.actions}>
-              <Button title="Cancel" variant="ghost" onPress={onClose} style={{ flex: 1 }} />
+              <Button title="Cancel" variant="ghost" onPress={cancel} style={{ flex: 1 }} />
               <View style={{ width: 12 }} />
               <Button title="Save workout" onPress={save} loading={busy} style={{ flex: 1.4 }} />
             </View>
