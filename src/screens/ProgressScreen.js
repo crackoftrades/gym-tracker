@@ -191,24 +191,32 @@ export default function ProgressScreen({ reloadSignal, onOpenExerciseId }) {
       ) : (
         <ScrollView contentContainerStyle={styles.list}>
           {logs.map((l) => (
-            <View key={l.id} style={styles.logRow}>
-              {!!l.photo_url && <Image source={{ uri: l.photo_url }} style={styles.logThumb} resizeMode="cover" />}
-              <View style={{ flex: 1 }}>
-                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                  <Text style={styles.logName} numberOfLines={1}>
-                    {l.exercise_name}
+            <View key={l.id} style={styles.logCard}>
+              <View style={styles.logRow}>
+                {!!l.photo_url && <Image source={{ uri: l.photo_url }} style={styles.logThumb} resizeMode="cover" />}
+                <View style={{ flex: 1 }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                    <Text style={styles.logName} numberOfLines={1}>
+                      {l.exercise_name}
+                    </Text>
+                    {prIds.has(l.id) && (
+                      <View style={styles.prBadge}>
+                        <Text style={styles.prText}>PR</Text>
+                      </View>
+                    )}
+                  </View>
+                  <Text style={styles.logMeta}>
+                    {prettyDate(l.performed_on)} · {l.sets.map((s) => `${s.reps}×${s.weight}`).join(', ')}
                   </Text>
-                  {prIds.has(l.id) && (
-                    <View style={styles.prBadge}>
-                      <Text style={styles.prText}>PR</Text>
-                    </View>
-                  )}
                 </View>
-                <Text style={styles.logMeta}>
-                  {prettyDate(l.performed_on)} · {l.sets.map((s) => `${s.reps}×${s.weight}`).join(', ')}
-                </Text>
+                <Text style={styles.logVol}>{Math.round(logVolume(l))}kg</Text>
               </View>
-              <Text style={styles.logVol}>{Math.round(logVolume(l))}kg</Text>
+              {!!l.ai_summary && (
+                <View style={styles.coachBox}>
+                  <Text style={styles.coachLabel}>Coach</Text>
+                  <Text style={styles.coachText}>{l.ai_summary}</Text>
+                </View>
+              )}
             </View>
           ))}
           <View style={{ height: spacing(3) }} />
@@ -290,9 +298,7 @@ const styles = StyleSheet.create({
   bars: { flexDirection: 'row', alignItems: 'flex-end', height: 42, marginLeft: 10 },
   barTrack: { width: 6, height: '100%', justifyContent: 'flex-end', marginLeft: 3 },
   barFill: { width: '100%', backgroundColor: colors.accent, borderRadius: 2 },
-  logRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
+  logCard: {
     backgroundColor: colors.card,
     borderRadius: radius.md,
     borderWidth: 1,
@@ -300,6 +306,28 @@ const styles = StyleSheet.create({
     padding: 14,
     marginBottom: 10,
   },
+  logRow: { flexDirection: 'row', alignItems: 'center' },
+  coachBox: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    backgroundColor: colors.cardAlt,
+    borderRadius: radius.sm,
+    borderLeftWidth: 3,
+    borderLeftColor: colors.accent,
+    paddingVertical: 9,
+    paddingHorizontal: 11,
+    marginTop: 12,
+  },
+  coachLabel: {
+    color: colors.accent,
+    fontSize: 10,
+    fontWeight: '900',
+    letterSpacing: 0.8,
+    textTransform: 'uppercase',
+    marginRight: 8,
+    marginTop: 2,
+  },
+  coachText: { flex: 1, color: colors.text, fontSize: 13, lineHeight: 19, fontStyle: 'italic' },
   logThumb: {
     width: 44,
     height: 44,
