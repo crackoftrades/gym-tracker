@@ -10,7 +10,7 @@ function todayLabel() {
   return new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' });
 }
 
-export default function TodayScreen({ reloadSignal, onLog, onOpenExercise, onGoPlan }) {
+export default function TodayScreen({ reloadSignal, coaching, onLog, onOpenExercise, onGoPlan }) {
   const [days, setDays] = useState([]);
   const [recent, setRecent] = useState([]);
   const [weekLogs, setWeekLogs] = useState([]);
@@ -116,17 +116,37 @@ export default function TodayScreen({ reloadSignal, onLog, onOpenExercise, onGoP
       {recent.length === 0 ? (
         <Text style={styles.noExercises}>Nothing logged yet. Pick an exercise and log your first set 💪</Text>
       ) : (
-        recent.map((l) => (
-          <View key={l.id} style={styles.recentRow}>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.recentName}>{l.exercise_name}</Text>
-              <Text style={styles.recentMeta}>
-                {prettyDate(l.performed_on)} · {l.sets.length} sets · {Math.round(logVolume(l))} kg
-              </Text>
+        recent.map((l) => {
+          const pending = coaching?.id === l.id && !coaching?.error && !l.ai_summary;
+          const failed = coaching?.id === l.id && !!coaching?.error && !l.ai_summary;
+          return (
+            <View key={l.id} style={styles.recentRow}>
+              <View style={styles.recentTop}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.recentName}>{l.exercise_name}</Text>
+                  <Text style={styles.recentMeta}>
+                    {prettyDate(l.performed_on)} · {l.sets.length} sets · {Math.round(logVolume(l))} kg
+                  </Text>
+                </View>
+                {!!l.split_day && <Tag label={l.split_day} color={splitColor[l.split_day] || colors.textDim} />}
+              </View>
+
+              {pending && (
+                <View style={styles.coachBox}>
+                  <ActivityIndicator size="small" color={colors.accent} />
+                  <Text style={styles.coachPending}>Coach is writing your summary…</Text>
+                </View>
+              )}
+              {failed && <Text style={styles.coachFailed}>Coach summary unavailable right now.</Text>}
+              {!!l.ai_summary && (
+                <View style={styles.coachBox}>
+                  <Text style={styles.coachLabel}>Coach</Text>
+                  <Text style={styles.coachText}>{l.ai_summary}</Text>
+                </View>
+              )}
             </View>
-            {!!l.split_day && <Tag label={l.split_day} color={splitColor[l.split_day] || colors.textDim} />}
-          </View>
-        ))
+          );
+        })
       )}
       <View style={{ height: spacing(3) }} />
     </ScrollView>
@@ -196,8 +216,6 @@ const styles = StyleSheet.create({
   },
   logBtnText: { color: colors.white, fontWeight: '900', fontSize: 14 },
   recentRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
     backgroundColor: colors.card,
     borderRadius: radius.md,
     borderWidth: 1,
@@ -205,6 +223,30 @@ const styles = StyleSheet.create({
     padding: 14,
     marginBottom: 10,
   },
+  recentTop: { flexDirection: 'row', alignItems: 'center' },
   recentName: { color: colors.text, fontSize: 15, fontWeight: '800' },
   recentMeta: { color: colors.textDim, fontSize: 13, marginTop: 2 },
+  coachBox: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    backgroundColor: colors.cardAlt,
+    borderRadius: radius.sm,
+    borderLeftWidth: 3,
+    borderLeftColor: colors.accent,
+    paddingVertical: 9,
+    paddingHorizontal: 11,
+    marginTop: 12,
+  },
+  coachLabel: {
+    color: colors.accent,
+    fontSize: 10,
+    fontWeight: '900',
+    letterSpacing: 0.8,
+    textTransform: 'uppercase',
+    marginRight: 8,
+    marginTop: 2,
+  },
+  coachText: { flex: 1, color: colors.text, fontSize: 13, lineHeight: 19, fontStyle: 'italic' },
+  coachPending: { color: colors.textDim, fontSize: 13, marginLeft: 8 },
+  coachFailed: { color: colors.textFaint, fontSize: 12, marginTop: 10 },
 });

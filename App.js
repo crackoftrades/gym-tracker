@@ -12,6 +12,7 @@ import LogSheet from './src/components/LogSheet';
 
 import { supabase, ensureDemoSession } from './src/lib/supabase';
 import { getExercise } from './src/lib/db';
+import { summarizeWorkout } from './src/lib/coach';
 import { colors, gradients } from './src/theme';
 
 const TABS = [
@@ -58,6 +59,7 @@ export default function App() {
   const [logging, setLogging] = useState(null);
   const [reload, setReload] = useState(0);
   const [attempt, setAttempt] = useState(0);
+  const [coaching, setCoaching] = useState(null); // { id, error } while a summary is in flight
 
   useEffect(() => {
     let alive = true;
@@ -98,7 +100,18 @@ export default function App() {
     }
   }, []);
   const startLog = useCallback((ex) => setLogging(ex), []);
-  const onSaved = useCallback(() => setReload((n) => n + 1), []);
+
+  // Saving a workout refreshes the lists right away, then quietly asks the
+  // edge-function coach for its blurb and refreshes again once it lands.
+  const onSaved = useCallback((log) => {
+    setReload((n) => n + 1);
+    if (!log?.id) return;
+    setCoaching({ id: log.id, error: '' });
+    summarizeWorkout(log)
+      .then(() => setCoaching(null))
+      .catch((e) => setCoaching({ id: log.id, error: String(e?.message || e) }))
+      .finally(() => setReload((n) => n + 1));
+  }, []);
 
   const body = () => {
     if (session === undefined) {
@@ -124,6 +137,7 @@ export default function App() {
           {tab === 'today' && (
             <TodayScreen
               reloadSignal={reload}
+              coaching={coaching}
               onLog={startLog}
               onOpenExercise={openExercise}
               onGoPlan={() => setTab('plan')}

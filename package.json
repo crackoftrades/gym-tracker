@@ -23,5 +23,9 @@
     "web": "expo start --web",
     "build:web": "expo export -p web"
   },
-  "private": true
+  "private": true,
+  "devDependencies": {
+    "@types/react": "~19.1.10",
+    "typescript": "~5.9.2"
+  }
 }

@@ -83,9 +83,10 @@ export default function LogSheet({ visible, exercise, onClose, onSaved }) {
     }
     setBusy(true);
     try {
-      await logWorkout({ exercise, sets: clean, notes, performedOn, photoUrl });
+      const log = await logWorkout({ exercise, sets: clean, notes, performedOn, photoUrl });
       setPhotoUrl(null);
-      onSaved?.();
+      // The saved row is handed up so the coach summary can be fetched for it.
+      onSaved?.(log);
       onClose?.();
     } catch (e) {
       setError(String(e?.message || e));

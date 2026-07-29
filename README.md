@@ -8,6 +8,32 @@ Log workouts (sets · reps · weight), plan your weekly split, and watch your pr
 - **Weekly Plan** — build training days (Push / Pull / Legs / Upper / Lower / Full Body) and stack exercises with target sets × reps.
 - **Exercises** — a curated library with step-by-step technique, coaching cues, and **common mistakes → how to fix them**. Filter by muscle group, split day, and equipment.
 - **Progress** — filter your history by **exercise type, date range, and split day**. See per-exercise progress status (progressing / plateaued / new), auto-detected personal records, a mini progress chart, and a full timeline.
+- **Coach summary** — every workout you save is sent to a Supabase edge function that writes a one-line motivational note about that session, shown under the entry in Recent activity.
+
+## Coach summary (edge function)
+
+`supabase/functions/workout-summary` takes `{ exercise, sets: [{reps, weight}], notes, splitDay }`,
+asks OpenRouter for 1–2 grounded sentences about the session, and returns `{ summary, model }`.
+It needs an `OPENROUTER_API_KEY` secret on the Supabase project.
+
+Saving a workout triggers it automatically — no button, no setup step. `App.js` hands
+the freshly inserted row to `summarizeWorkout()` (`src/lib/coach.js`), which invokes the
+function and writes the reply to `workout_logs.ai_summary`, so the blurb stays under the
+entry on later visits instead of being regenerated on every load. While it's in flight the
+entry shows "Coach is writing your summary…"; if it fails the workout is still saved.
+
+Model selection is env-driven on the function:
+
+- `OPENROUTER_MODEL` — default `anthropic/claude-haiku-4.5`
+- `OPENROUTER_FALLBACK_MODELS` — comma-separated, tried in order when the primary model
+  errors or returns nothing. Defaults to free Gemma models so the demo works on an
+  OpenRouter account with no credits; the primary model takes over once credits exist.
+
+Deploy after edits:
+
+```bash
+npx supabase functions deploy workout-summary --project-ref yijxsityqkuchmjzpggi
+```
 
 ## Demo stage — no login
 
@@ -52,13 +78,15 @@ Config lives in `.env` (copy from `.env.example`). The Supabase URL and publisha
 - `App.js` — demo session bootstrap + bottom-tab navigation + detail/log overlays
 - `src/lib/supabase.js` — Supabase client + `ensureDemoSession()` (anonymous sign-in)
 - `src/lib/db.js` — all data access (exercises, plan, logs)
+- `src/lib/coach.js` — calls the `workout-summary` edge function and saves its reply
+- `supabase/functions/workout-summary/` — the edge function (Deno + OpenRouter)
 - `src/lib/metrics.js` — volume, estimated 1RM, PR detection, progress status
 - `src/screens/` — Today, Plan, Library, ExerciseDetail, Progress
 - `src/components/` — Button, Chip, Tag, ExerciseRow, ExercisePicker, LogSheet
 
 ## Database
 
-Tables (all with RLS): `exercises`, `plan_days`, `plan_exercises`, `workout_logs` (sets stored as JSONB). Schema and the seeded exercise library were applied via Supabase migrations.
+Tables (all with RLS): `exercises`, `plan_days`, `plan_exercises`, `workout_logs` (sets stored as JSONB, coach blurb in `ai_summary`). Schema and the seeded exercise library were applied via Supabase migrations.
 
 `exercises` and `workout_logs` both allow `user_id IS NULL` to mean "shared demo
 content, readable by all, writable by none". `plan_days` and `plan_exercises` stay
