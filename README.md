@@ -82,9 +82,9 @@ Two dashboard settings matter for the confirmation link to work:
 
 Data ownership: every row is keyed to `auth.uid()` and Row Level Security enforces it, so
 a guest's logs and an account's logs never mix. `workout_logs` reads are **owner-only** —
-a new account lands on an empty app until it logs something. Three legacy sample rows with
-`user_id IS NULL` are still in the table but no longer readable by anyone; the shared-demo
-carve-out that used to surface them was removed.
+a new account lands on an empty app until it logs something. The three shared sample
+workouts that used to greet every visitor were removed along with the carve-out that
+surfaced them; their contents are kept in `supabase/seed-rows-removed-2026-07-30.sql`.
 
 Guest mode still requires **Anonymous sign-ins** enabled under Authentication → Sign In /
 Providers. Guest data belongs to a throwaway anonymous user; signing out of guest mode
@@ -133,9 +133,12 @@ Tables (all with RLS): `exercises`, `plan_days`, `plan_exercises`, `workout_logs
 | UPDATE | `USING / WITH CHECK (user_id = auth.uid())` — needed so SARGE can write `ai_summary` back |
 | DELETE | `USING (user_id = auth.uid())` |
 
-`user_id` is a nullable `uuid` referencing `auth.users(id)`. It stays nullable only because
-three legacy rows predate the rule; nothing can read them now. Adding `NOT NULL` (and a
-`DEFAULT auth.uid()`) means dealing with those rows first.
+`user_id` is `uuid NOT NULL` referencing `auth.users(id)` **on delete cascade** — deleting
+an account takes its logs with it. Ownership is therefore structural, not just enforced by
+policy: a row cannot exist without an owner even on paths that bypass RLS.
+
+There is no `DEFAULT auth.uid()`; `logWorkout()` sets `user_id` explicitly, and an insert
+that forgets it should fail loudly rather than quietly attach to whoever is calling.
 
 `exercises` still allows `user_id IS NULL` to mean "shared library content, readable by
 all, writable by none". `plan_days` and `plan_exercises` stay strictly per-user — a shared
