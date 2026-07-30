@@ -24,10 +24,14 @@ entry shows "Coach is writing your summary…"; if it fails the workout is still
 
 Model selection is env-driven on the function:
 
-- `OPENROUTER_MODEL` — default `anthropic/claude-haiku-4.5`
-- `OPENROUTER_FALLBACK_MODELS` — comma-separated, tried in order when the primary model
-  errors or returns nothing. Defaults to free Gemma models so the demo works on an
-  OpenRouter account with no credits; the primary model takes over once credits exist.
+- `OPENROUTER_MODELS` — comma-separated, tried in order until one returns prose.
+  Defaults to `google/gemma-4-26b-a4b-it:free,google/gemma-4-31b-it:free`.
+
+**Free tier only** — no paid model is attempted, so the function never needs OpenRouter
+credits. To use a paid model, put it first in `OPENROUTER_MODELS` (e.g.
+`anthropic/claude-haiku-4.5,google/gemma-4-26b-a4b-it:free`) and fund the account.
+Models are pinned rather than using `openrouter/free`, whose random routing lands on
+classifiers and reasoning models that return no prose.
 
 Deploy after edits:
 
