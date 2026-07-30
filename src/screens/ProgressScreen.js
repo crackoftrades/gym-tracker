@@ -3,7 +3,7 @@ import { ActivityIndicator, Image, Pressable, ScrollView, StyleSheet, Text, View
 import Chip from '../components/Chip';
 import Tag from '../components/Tag';
 import { listLogs } from '../lib/db';
-import { CATEGORIES, DATE_RANGES, SPLIT_DAYS } from '../lib/constants';
+import { CATEGORIES, COACH_NAME, DATE_RANGES, SPLIT_DAYS } from '../lib/constants';
 import {
   bestE1RM,
   daysAgoIso,
@@ -213,7 +213,7 @@ export default function ProgressScreen({ reloadSignal, onOpenExerciseId }) {
               </View>
               {!!l.ai_summary && (
                 <View style={styles.coachBox}>
-                  <Text style={styles.coachLabel}>Coach</Text>
+                  <Text style={styles.coachLabel}>{COACH_NAME}</Text>
                   <Text style={styles.coachText}>{l.ai_summary}</Text>
                 </View>
               )}

@@ -1,3 +1,7 @@
+// The AI training partner's name. Keep in sync with the persona in
+// supabase/functions/workout-summary/index.ts.
+export const COACH_NAME = 'SARGE';
+
 export const CATEGORIES = ['Chest', 'Back', 'Legs', 'Shoulders', 'Arms', 'Core'];
 export const SPLIT_DAYS = ['Push', 'Pull', 'Legs', 'Upper', 'Lower', 'Full Body'];
 export const EQUIPMENT = ['Barbell', 'Dumbbell', 'Machine', 'Cable', 'Bodyweight', 'Kettlebell'];

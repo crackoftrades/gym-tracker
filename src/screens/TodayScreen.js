@@ -3,6 +3,7 @@ import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from
 import { LinearGradient } from 'expo-linear-gradient';
 import Tag from '../components/Tag';
 import { listLogs, listPlan } from '../lib/db';
+import { COACH_NAME } from '../lib/constants';
 import { daysAgoIso, logVolume, prettyDate } from '../lib/metrics';
 import { colors, gradients, radius, splitColor, spacing } from '../theme';
 
@@ -134,13 +135,13 @@ export default function TodayScreen({ reloadSignal, coaching, onLog, onOpenExerc
               {pending && (
                 <View style={styles.coachBox}>
                   <ActivityIndicator size="small" color={colors.accent} />
-                  <Text style={styles.coachPending}>Coach is writing your summary…</Text>
+                  <Text style={styles.coachPending}>{COACH_NAME} is sizing up your session…</Text>
                 </View>
               )}
-              {failed && <Text style={styles.coachFailed}>Coach summary unavailable right now.</Text>}
+              {failed && <Text style={styles.coachFailed}>{COACH_NAME} is off the grid right now.</Text>}
               {!!l.ai_summary && (
                 <View style={styles.coachBox}>
-                  <Text style={styles.coachLabel}>Coach</Text>
+                  <Text style={styles.coachLabel}>{COACH_NAME}</Text>
                   <Text style={styles.coachText}>{l.ai_summary}</Text>
                 </View>
               )}

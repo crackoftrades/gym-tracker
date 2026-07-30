@@ -8,19 +8,31 @@ Log workouts (sets · reps · weight), plan your weekly split, and watch your pr
 - **Weekly Plan** — build training days (Push / Pull / Legs / Upper / Lower / Full Body) and stack exercises with target sets × reps.
 - **Exercises** — a curated library with step-by-step technique, coaching cues, and **common mistakes → how to fix them**. Filter by muscle group, split day, and equipment.
 - **Progress** — filter your history by **exercise type, date range, and split day**. See per-exercise progress status (progressing / plateaued / new), auto-detected personal records, a mini progress chart, and a full timeline.
-- **Coach summary** — every workout you save is sent to a Supabase edge function that writes a one-line motivational note about that session, shown under the entry in Recent activity.
+- **SARGE** — every workout you save is sent to a Supabase edge function where an AI drill instructor reads your numbers and tells you what they're worth. Shown under the entry in Recent activity and the Progress timeline.
 
-## Coach summary (edge function)
+## SARGE, the AI training partner (edge function)
 
 `supabase/functions/workout-summary` takes `{ exercise, sets: [{reps, weight}], notes, splitDay }`,
-asks OpenRouter for 1–2 grounded sentences about the session, and returns `{ summary, model }`.
-It needs an `OPENROUTER_API_KEY` secret on the Supabase project.
+asks OpenRouter for 1–2 grounded sentences about the session, and returns
+`{ summary, model, coach }`. It needs an `OPENROUTER_API_KEY` secret on the Supabase project.
+
+**The character.** SARGE is a relentless, no-excuses drill instructor in the ultra-endurance
+hardass mold: comfort is the enemy, the logged set is evidence rather than an achievement,
+and respect is earned. The full personality lives in `SYSTEM_PROMPT` at the top of the
+function — edit it there and redeploy to change the voice. He is an original character, not
+an impersonation of any real athlete, so the app never attributes invented words to a real
+person. The prompt also fences him in: hard on the standard but never cruel to the person,
+no profanity, no "push through the pain", no medical or nutrition advice, and no inventing
+numbers that weren't in the session.
+
+`COACH_NAME` in `src/lib/constants.js` drives the name shown in the UI — keep it in sync with
+the function's own `COACH_NAME`.
 
 Saving a workout triggers it automatically — no button, no setup step. `App.js` hands
 the freshly inserted row to `summarizeWorkout()` (`src/lib/coach.js`), which invokes the
 function and writes the reply to `workout_logs.ai_summary`, so the blurb stays under the
 entry on later visits instead of being regenerated on every load. While it's in flight the
-entry shows "Coach is writing your summary…"; if it fails the workout is still saved.
+entry shows "SARGE is sizing up your session…"; if it fails the workout is still saved.
 
 Model selection is env-driven on the function:
 
