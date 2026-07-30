@@ -1,4 +1,5 @@
 import 'react-native-url-polyfill/auto';
+import { Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { createClient } from '@supabase/supabase-js';
 
@@ -15,20 +16,8 @@ export const supabase = createClient(url, key, {
     storage: AsyncStorage,
     autoRefreshToken: true,
     persistSession: true,
-    detectSessionInUrl: false,
+    // Email confirmation links come back with the tokens in the URL fragment,
+    // so the web build has to read them. Native has no URL to parse.
+    detectSessionInUrl: Platform.OS === 'web',
   },
 });
-
-// Demo stage: there is no login screen. Every table's RLS policy and user_id
-// foreign key still needs a real auth.users session, so we mint an anonymous
-// one on first launch and reuse it from AsyncStorage forever after. Each
-// device therefore gets its own private plan and logs, with RLS unchanged.
-export async function ensureDemoSession() {
-  const { data, error } = await supabase.auth.getSession();
-  if (error) throw error;
-  if (data.session) return data.session;
-
-  const { data: fresh, error: signInError } = await supabase.auth.signInAnonymously();
-  if (signInError) throw signInError;
-  return fresh.session;
-}

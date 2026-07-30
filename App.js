@@ -8,9 +8,12 @@ import PlanScreen from './src/screens/PlanScreen';
 import LibraryScreen from './src/screens/LibraryScreen';
 import ProgressScreen from './src/screens/ProgressScreen';
 import ExerciseDetailScreen from './src/screens/ExerciseDetailScreen';
+import AuthScreen from './src/screens/AuthScreen';
 import LogSheet from './src/components/LogSheet';
+import AccountSheet from './src/components/AccountSheet';
 
-import { supabase, ensureDemoSession } from './src/lib/supabase';
+import { supabase } from './src/lib/supabase';
+import { accountLabel } from './src/lib/auth';
 import { getExercise } from './src/lib/db';
 import { summarizeWorkout } from './src/lib/coach';
 import { colors, gradients } from './src/theme';
@@ -42,7 +45,7 @@ function StartupError({ message, onRetry }) {
   return (
     <View style={styles.errorWrap}>
       <Text style={styles.errorEmoji}>🏋️</Text>
-      <Text style={styles.errorTitle}>Can’t start the demo</Text>
+      <Text style={styles.errorTitle}>Can’t reach your account</Text>
       <Text style={styles.errorBody}>{message}</Text>
       <Pressable onPress={onRetry} style={styles.retry} hitSlop={8}>
         <Text style={styles.retryText}>Try again</Text>
@@ -60,28 +63,46 @@ export default function App() {
   const [reload, setReload] = useState(0);
   const [attempt, setAttempt] = useState(0);
   const [coaching, setCoaching] = useState(null); // { id, error } while a summary is in flight
+  const [account, setAccount] = useState(false);
 
   useEffect(() => {
     let alive = true;
+    // Fires for the restored session on boot and for every sign-in / sign-out
+    // afterwards, so this single listener drives the auth gate below.
+    //
+    // The state update is deferred a tick on purpose: supabase-js holds an
+    // internal auth lock for the duration of this callback, and the screens
+    // this render mounts query immediately. Fetching inside the lock resolves
+    // with no access token, so a fresh sign-in would land on an empty app
+    // until the user reloaded.
     const { data: sub } = supabase.auth.onAuthStateChange((_e, s) => {
-      if (alive && s) setSession(s);
+      if (!alive) return;
+      setTimeout(() => {
+        if (!alive) return;
+        setSession(s ?? null);
+        // Never leave one account's screens standing in front of the next one.
+        if (!s) {
+          setAccount(false);
+          setDetail(null);
+          setLogging(null);
+          setCoaching(null);
+          setTab('today');
+        }
+      }, 0);
     });
 
     setSession(undefined);
     setAuthError('');
-    ensureDemoSession()
-      .then((s) => {
+    supabase.auth
+      .getSession()
+      .then(({ data, error }) => {
         if (!alive) return;
-        setSession(s);
+        if (error) throw error;
+        setSession(data.session ?? null);
       })
       .catch((e) => {
         if (!alive) return;
-        const raw = String(e?.message || e);
-        setAuthError(
-          /anonymous/i.test(raw)
-            ? 'Anonymous sign-ins are disabled for this Supabase project. Enable them under Authentication → Sign In / Providers, then try again.'
-            : raw,
-        );
+        setAuthError(String(e?.message || e));
         setSession(null);
       });
 
@@ -117,8 +138,14 @@ export default function App() {
     if (session === undefined) {
       return <ActivityIndicator color={colors.primary} style={{ flex: 1 }} />;
     }
+    // Only a failed session lookup is an error worth a retry screen; simply
+    // being signed out is the normal path to the sign-in form.
     if (!session) {
-      return <StartupError message={authError} onRetry={() => setAttempt((n) => n + 1)} />;
+      return authError ? (
+        <StartupError message={authError} onRetry={() => setAttempt((n) => n + 1)} />
+      ) : (
+        <AuthScreen />
+      );
     }
 
     if (detail) {
@@ -131,7 +158,11 @@ export default function App() {
       <View style={styles.flex}>
         <View style={styles.topbar}>
           <Text style={styles.brand}>Gym Tracker</Text>
-          <Text style={styles.demoBadge}>Demo</Text>
+          <Pressable onPress={() => setAccount(true)} hitSlop={8}>
+            <Text style={styles.accountChip} numberOfLines={1}>
+              {accountLabel(session)}
+            </Text>
+          </Pressable>
         </View>
         <View style={styles.flex}>
           {tab === 'today' && (
@@ -163,6 +194,7 @@ export default function App() {
         onClose={() => setLogging(null)}
         onSaved={onSaved}
       />
+      <AccountSheet visible={account} session={session} onClose={() => setAccount(false)} />
     </View>
   );
 }
@@ -182,18 +214,18 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
   },
   brand: { color: colors.textDim, fontSize: 13, fontWeight: '800', letterSpacing: 1, textTransform: 'uppercase' },
-  demoBadge: {
-    color: colors.textFaint,
+  accountChip: {
+    color: colors.textDim,
     fontSize: 11,
     fontWeight: '800',
-    letterSpacing: 1,
-    textTransform: 'uppercase',
+    letterSpacing: 0.6,
     borderWidth: 1,
     borderColor: colors.border,
     borderRadius: 999,
     paddingHorizontal: 10,
     paddingVertical: 3,
     overflow: 'hidden',
+    maxWidth: 190,
   },
   errorWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 28 },
   errorEmoji: { fontSize: 44 },

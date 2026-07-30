@@ -17,6 +17,7 @@ export default function TodayScreen({ reloadSignal, coaching, onLog, onOpenExerc
   const [weekLogs, setWeekLogs] = useState([]);
   const [openDay, setOpenDay] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
 
   useEffect(() => {
     let alive = true;
@@ -27,7 +28,14 @@ export default function TodayScreen({ reloadSignal, coaching, onLog, onOpenExerc
         setDays(p);
         setRecent(all.slice(0, 4));
         setWeekLogs(week);
+        setError('');
         if (p.length && openDay === null) setOpenDay(p[0].id);
+      })
+      // Without this a failed load looked exactly like an empty account.
+      .catch((e) => {
+        if (!alive) return;
+        console.warn('Today load failed:', e);
+        setError(String(e?.message || e));
       })
       .finally(() => alive && setLoading(false));
     return () => {
@@ -40,6 +48,7 @@ export default function TodayScreen({ reloadSignal, coaching, onLog, onOpenExerc
   const active = days.find((d) => d.id === openDay);
 
   if (loading) return <ActivityIndicator color={colors.primary} style={{ marginTop: spacing(6) }} />;
+  if (error) return <Text style={styles.loadError}>Couldn’t load your training data.{'\n'}{error}</Text>;
 
   return (
     <ScrollView contentContainerStyle={styles.scroll}>
@@ -197,6 +206,14 @@ const styles = StyleSheet.create({
   dayTabTextActive: { color: colors.primary },
   dayBox: { marginTop: spacing(1) },
   noExercises: { color: colors.textDim, fontSize: 14, lineHeight: 21 },
+  loadError: {
+    color: colors.danger,
+    fontSize: 14,
+    lineHeight: 21,
+    textAlign: 'center',
+    padding: spacing(3),
+    marginTop: spacing(4),
+  },
   exRow: {
     flexDirection: 'row',
     alignItems: 'center',

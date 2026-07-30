@@ -51,29 +51,46 @@ Deploy after edits:
 npx supabase functions deploy workout-summary --project-ref yijxsityqkuchmjzpggi
 ```
 
-## Demo stage — no login
+## Accounts
 
-There is no sign-up or sign-in screen. On first launch the app silently creates a
-**Supabase anonymous session** and stores it on the device, so you land straight on
-Today. Nothing to remember, nothing to type.
+Launching with no stored session lands you on `src/screens/AuthScreen.js`, which offers
+three ways in:
 
-What this means in practice:
+- **Sign up** with email + password. Supabase creates the account and emails a
+  confirmation link; the screen switches to a "confirm your email" panel until it's clicked.
+- **Sign in** with the same credentials once confirmed.
+- **Continue as guest** — the original demo behaviour, an anonymous Supabase session
+  that keeps everything on this device.
 
-- Your plan and any workouts you log are **private to that device** — the anonymous
-  user id is the owner, and Row Level Security enforces it.
-- **Three sample workouts are shared with everyone.** They use the same
-  `user_id IS NULL` convention the `exercises` library already uses: the row belongs
-  to nobody, so every visitor can read it, and the insert/update/delete policies
-  (`user_id = auth.uid()`) mean nobody can edit or delete it. New visitors land on a
-  populated app instead of an empty one.
-- The session persists across restarts. Clearing app storage (or a browser's site
-  data) starts a fresh, empty account — the old rows are orphaned, not visible.
-- There's no cross-device sync while anonymous. Adding email/password back later is
-  just a login screen plus `supabase.auth.linkIdentity()` to keep existing data.
+Log out from the account chip in the top-right corner (it shows your email, or "Guest").
+`src/lib/auth.js` holds every auth call plus `authErrorMessage()`, which turns Supabase's
+terse errors into something a user can act on.
 
-Requires **Anonymous sign-ins** to be enabled in the Supabase dashboard under
-Authentication → Sign In / Providers. If it's off, the app says so on launch
-instead of failing silently.
+**Email confirmation is on** (`mailer_autoconfirm: false` on this project), so `signUp()`
+returns no session and the account can't sign in until the link is clicked. To let people
+in immediately instead, turn off **Confirm email** under Authentication → Sign In /
+Providers → Email; the app already handles both — it reads whether a session came back
+rather than assuming.
+
+Two dashboard settings matter for the confirmation link to work:
+
+- **Site URL / Redirect URLs** (Authentication → URL Configuration) must include the
+  deployed origin, otherwise the link bounces to `localhost:3000`. The app passes
+  `emailRedirectTo: window.location.origin` on web.
+- Supabase's **built-in email service is rate-limited** (a couple of messages an hour).
+  Wire up custom SMTP before letting real users sign up.
+
+Data ownership is unchanged: every row is keyed to `auth.uid()` and Row Level Security
+enforces it, so a guest's logs and an account's logs never mix. **Three sample workouts
+are shared with everyone** via the `user_id IS NULL` convention the `exercises` library
+already uses — readable by all, writable by none, so new accounts land on a populated app
+instead of an empty one.
+
+Guest mode still requires **Anonymous sign-ins** enabled under Authentication → Sign In /
+Providers. Guest data belongs to a throwaway anonymous user; signing out of guest mode
+abandons it. Converting a guest into a real account in place (keeping their history) would
+mean calling `supabase.auth.updateUser({ email, password })` on the anonymous session —
+not wired up yet.
 
 ## Data & privacy
 
@@ -91,8 +108,11 @@ Config lives in `.env` (copy from `.env.example`). The Supabase URL and publisha
 
 ## Project layout
 
-- `App.js` — demo session bootstrap + bottom-tab navigation + detail/log overlays
-- `src/lib/supabase.js` — Supabase client + `ensureDemoSession()` (anonymous sign-in)
+- `App.js` — auth gate + bottom-tab navigation + detail/log/account overlays
+- `src/lib/supabase.js` — the Supabase client
+- `src/lib/auth.js` — sign up / sign in / guest / sign out + error copy
+- `src/screens/AuthScreen.js` — sign-in and sign-up form
+- `src/components/AccountSheet.js` — who you're signed in as, and log out
 - `src/lib/db.js` — all data access (exercises, plan, logs)
 - `src/lib/coach.js` — calls the `workout-summary` edge function and saves its reply
 - `supabase/functions/workout-summary/` — the edge function (Deno + OpenRouter)
