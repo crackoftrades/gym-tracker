@@ -80,11 +80,11 @@ Two dashboard settings matter for the confirmation link to work:
 - Supabase's **built-in email service is rate-limited** (a couple of messages an hour).
   Wire up custom SMTP before letting real users sign up.
 
-Data ownership is unchanged: every row is keyed to `auth.uid()` and Row Level Security
-enforces it, so a guest's logs and an account's logs never mix. **Three sample workouts
-are shared with everyone** via the `user_id IS NULL` convention the `exercises` library
-already uses — readable by all, writable by none, so new accounts land on a populated app
-instead of an empty one.
+Data ownership: every row is keyed to `auth.uid()` and Row Level Security enforces it, so
+a guest's logs and an account's logs never mix. `workout_logs` reads are **owner-only** —
+a new account lands on an empty app until it logs something. Three legacy sample rows with
+`user_id IS NULL` are still in the table but no longer readable by anyone; the shared-demo
+carve-out that used to surface them was removed.
 
 Guest mode still requires **Anonymous sign-ins** enabled under Authentication → Sign In /
 Providers. Guest data belongs to a throwaway anonymous user; signing out of guest mode
@@ -124,10 +124,22 @@ Config lives in `.env` (copy from `.env.example`). The Supabase URL and publisha
 
 Tables (all with RLS): `exercises`, `plan_days`, `plan_exercises`, `workout_logs` (sets stored as JSONB, coach blurb in `ai_summary`). Schema and the seeded exercise library were applied via Supabase migrations.
 
-`exercises` and `workout_logs` both allow `user_id IS NULL` to mean "shared demo
-content, readable by all, writable by none". `plan_days` and `plan_exercises` stay
-strictly per-user — a shared plan that any visitor could delete would be worse than
-no plan.
+`workout_logs` policies (all `to authenticated`):
+
+| Command | Expression |
+| --- | --- |
+| SELECT | `USING (user_id = auth.uid())` |
+| INSERT | `WITH CHECK (user_id = auth.uid())` |
+| UPDATE | `USING / WITH CHECK (user_id = auth.uid())` — needed so SARGE can write `ai_summary` back |
+| DELETE | `USING (user_id = auth.uid())` |
+
+`user_id` is a nullable `uuid` referencing `auth.users(id)`. It stays nullable only because
+three legacy rows predate the rule; nothing can read them now. Adding `NOT NULL` (and a
+`DEFAULT auth.uid()`) means dealing with those rows first.
+
+`exercises` still allows `user_id IS NULL` to mean "shared library content, readable by
+all, writable by none". `plan_days` and `plan_exercises` stay strictly per-user — a shared
+plan that any visitor could delete would be worse than no plan.
 
 Anonymous users accumulate with no automatic cleanup, and Supabase rate-limits
 anonymous sign-ins to 30/hour per IP. To reap empty sessions without touching
