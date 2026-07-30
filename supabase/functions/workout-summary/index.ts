@@ -4,14 +4,12 @@ import 'jsr:@supabase/functions-js/edge-runtime.d.ts';
 // Called automatically by the app right after a workout is saved.
 
 const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
-const MODEL = Deno.env.get('OPENROUTER_MODEL') ?? 'anthropic/claude-haiku-4.5';
-// The demo OpenRouter account has no credits, so rather than show nothing we
-// fall through to free models until one answers. The primary model takes over
-// by itself as soon as the account is topped up. These are pinned rather than
-// using `openrouter/free`, whose random routing lands on classifiers and
-// reasoning models that return no prose.
-const FALLBACK_MODELS = (
-  Deno.env.get('OPENROUTER_FALLBACK_MODELS') ?? 'google/gemma-4-26b-a4b-it:free,google/gemma-4-31b-it:free'
+// Free-tier only — no paid model is attempted, so this never needs OpenRouter
+// credits. Pinned to specific models rather than `openrouter/free`, whose
+// random routing lands on classifiers and reasoning models that return no
+// prose. First is primary; the rest are only tried if it errors or is empty.
+const MODELS = (
+  Deno.env.get('OPENROUTER_MODELS') ?? 'google/gemma-4-26b-a4b-it:free,google/gemma-4-31b-it:free'
 )
   .split(',')
   .map((m) => m.trim())
@@ -128,10 +126,9 @@ Deno.serve(async (req: Request) => {
 
   let out;
   try {
-    out = await ask(MODEL);
-    for (const fallback of FALLBACK_MODELS) {
+    for (const model of MODELS) {
+      out = await ask(model);
       if (out.ok) break;
-      out = await ask(fallback);
     }
   } catch (e) {
     return json({ error: `Could not reach OpenRouter: ${String(e)}` }, 502);
