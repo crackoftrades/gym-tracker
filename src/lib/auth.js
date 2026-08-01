@@ -4,9 +4,15 @@ import { supabase } from './supabase';
 // Where Supabase sends people after they click the confirmation link. Only
 // meaningful on web — a native build would need its own URL scheme registered
 // under Authentication → URL Configuration.
+//
+// The trailing slash matters. Redirect URLs are allow-listed as glob patterns
+// and the conventional entry is `http://host:port/**`, which requires a path
+// segment — a bare origin does not match it. Supabase silently falls back to
+// the Site URL when a redirect isn't allow-listed, so without the slash a
+// local sign-up confirmation bounces to production instead of the dev server.
 function redirectTo() {
   if (Platform.OS !== 'web' || typeof window === 'undefined') return undefined;
-  return window.location.origin;
+  return window.location.origin + '/';
 }
 
 // Supabase's raw messages are terse and sometimes leak internals. Map the ones
