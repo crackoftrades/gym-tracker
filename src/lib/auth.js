@@ -29,6 +29,12 @@ export function authErrorMessage(e) {
   if (/anonymous/i.test(raw)) {
     return 'Guest mode is disabled for this Supabase project. Enable anonymous sign-ins, or create an account.';
   }
+  // Distinct from a per-user throttle: Supabase's built-in SMTP is capped at a
+  // couple of emails per hour for the whole project, so one person signing up
+  // can block the next one. Only a custom SMTP provider raises this ceiling.
+  if (/email rate limit/i.test(raw) || e?.code === 'over_email_send_rate_limit') {
+    return "The confirmation-email quota for this app is used up. Try again in an hour, or continue as guest.";
+  }
   if (/rate limit|too many requests|after \d+ seconds/i.test(raw)) {
     return 'Too many attempts. Wait a minute and try again.';
   }
