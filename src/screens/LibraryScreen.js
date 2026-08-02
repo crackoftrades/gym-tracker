@@ -104,7 +104,7 @@ const styles = StyleSheet.create({
     color: colors.text,
     fontSize: 15,
   },
-  filterScroll: { flexGrow: 0, marginTop: spacing(1) },
+  filterScroll: { flexGrow: 0, flexShrink: 0, marginTop: spacing(1) },
   filterRow: { paddingHorizontal: spacing(2.5) },
   list: { padding: spacing(2.5), paddingTop: spacing(1) },
   error: { color: colors.danger, textAlign: 'center', marginTop: spacing(4), paddingHorizontal: spacing(3) },
