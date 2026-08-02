@@ -119,7 +119,10 @@ and a half dinars.
 - `supabase/functions/create-payment/` — reads the price from the `courses` table,
   writes a `bookings` row, calls MyFatoorah `POST /v2/SendPayment`, returns `InvoiceURL`.
 - `supabase/functions/payment-webhook/` — receives MyFatoorah's event and sets
-  `payment_status`. **The only thing in the system that can.**
+  `payment_status`.
+- `supabase/functions/confirm-payment/` — the same job, pulled rather than pushed, for
+  when no webhook can be registered. Together these two are **the only things in the
+  system that can write `payment_status`.**
 - `src/screens/PaymentResultScreen.js` — the success and error pages.
 
 ### Why the client can't cheat
@@ -153,7 +156,31 @@ whichever source is in use supplies *every* field.
 | `failed` | either | Invoice refused, or the payment failed / was cancelled |
 | `expired` | `payment-webhook` | The invoice timed out unpaid |
 
+### Two ways a payment gets confirmed
+
+The gateway can **push** the result to us, or we can **pull** it. Both end up asking
+MyFatoorah's own API and writing what it says, so neither is weaker than the other:
+
+| | `payment-webhook` (push) | `confirm-payment` (pull) |
+| --- | --- | --- |
+| Triggered by | MyFatoorah POSTing an event | The app, while the buyer waits |
+| Needs portal setup | Yes — webhook registered on **your** merchant account | No |
+| Verifies | Signature, then re-reads `getPaymentStatus` | Reads `getPaymentStatus` |
+| Scope | Any booking | Only a booking belonging to the caller |
+
+**The sandbox runs on the pull path alone.** Webhooks are registered per merchant
+account, and the default key is MyFatoorah's *public* sandbox token — you don't own its
+portal, so no event will ever reach you. `confirm-payment` closes that loop with zero
+setup: the success page calls it while polling, and the Courses tab calls it on load for
+any booking still sitting at `awaiting_payment`, so a buyer who closed the tab
+mid-checkout still comes back to **ENROLLED**.
+
+Once you register a real webhook, the pull path stays useful as the backstop for a
+delayed or dropped event. Nothing needs changing to switch over.
+
 ### Registering the webhook — a portal step, not an API call
+
+Only needed on your own merchant account; skip it for sandbox demos.
 
 **MyFatoorah registers webhooks once in the dashboard.** There is no per-charge webhook
 parameter (`SendPayment` has `CallBackUrl`/`ErrorUrl`, which are *browser redirects*, not
@@ -173,22 +200,16 @@ Then set the key on Supabase (Project Settings → Edge Functions → Secrets):
 
 | Secret | Needed? | Notes |
 | --- | --- | --- |
+| *(none)* | — | The sandbox works with no secrets set at all |
 | `MYFATOORAH_WEBHOOK_SECRET` | **Yes, before launch** | Without it the webhook logs a warning and leans entirely on the API read-back |
-| `MYFATOORAH_API_KEY` | Recommended | Falls back to MyFatoorah's published sandbox token |
+| `MYFATOORAH_API_KEY` | On go-live | Falls back to MyFatoorah's published sandbox token |
 | `MYFATOORAH_BASE_URL` | On go-live | Defaults to `https://apitest.myfatoorah.com`; use the live host for your country |
 | `PUBLIC_SITE_URL` / `PAYMENT_ALLOWED_ORIGINS` | Optional | Return-URL allow-list. Unrecognised origins are dropped, so the invoice can't be turned into an open redirect |
-
-**The catch with the shared sandbox token.** The default key is MyFatoorah's *public*
-demo account — you don't own its portal, so you cannot register a webhook against it.
-Invoices open and the redirect pages work, but nothing will ever call `payment-webhook`.
-To see the full loop, register your own test account at
-<https://registertest.myfatoorah.com/en/>, set `MYFATOORAH_API_KEY` to its key, and
-configure the webhook there.
 
 Deploy after edits:
 
 ```bash
-npx supabase functions deploy create-payment payment-webhook --project-ref yijxsityqkuchmjzpggi
+npx supabase functions deploy create-payment confirm-payment payment-webhook --project-ref yijxsityqkuchmjzpggi
 ```
 
 ## Data & privacy
@@ -217,7 +238,8 @@ Config lives in `.env` (copy from `.env.example`). The Supabase URL and publisha
 - `src/lib/payments.js` — courses, bookings, checkout, and `/pay/...` route parsing
 - `supabase/functions/workout-summary/` — the edge function (Deno + OpenRouter)
 - `supabase/functions/create-payment/` — opens a MyFatoorah invoice for one course
-- `supabase/functions/payment-webhook/` — the only writer of `bookings.payment_status`
+- `supabase/functions/confirm-payment/` — pulls one booking's status from the gateway
+- `supabase/functions/payment-webhook/` — the gateway's push, for a real merchant account
 - `supabase/migrations/` — schema as applied (courses, bookings, RLS)
 - `src/lib/metrics.js` — volume, estimated 1RM, PR detection, progress status
 - `src/screens/` — Today, Plan, Library, Courses, ExerciseDetail, Progress, PaymentResult

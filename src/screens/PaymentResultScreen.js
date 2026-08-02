@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from 'react-native';
 import Button from '../components/Button';
-import { getBooking } from '../lib/payments';
+import { confirmPayment, getBooking } from '../lib/payments';
 import { colors, radius, shadow, spacing } from '../theme';
 
 // Where MyFatoorah drops the buyer once checkout is over: /pay/success/<ref>
@@ -87,6 +87,10 @@ export default function PaymentResultScreen({ route, session, onDone }) {
 
     const tick = async () => {
       try {
+        // Ask the gateway first, then read what got written. Without this the
+        // page would wait on a webhook that never arrives when the project is
+        // running on MyFatoorah's shared sandbox token.
+        await confirmPayment(reference).catch(() => {});
         const row = await getBooking(reference);
         if (!alive) return;
         if (row) setBooking(row);
