@@ -7,7 +7,9 @@ import TodayScreen from './src/screens/TodayScreen';
 import PlanScreen from './src/screens/PlanScreen';
 import LibraryScreen from './src/screens/LibraryScreen';
 import ProgressScreen from './src/screens/ProgressScreen';
+import CoursesScreen from './src/screens/CoursesScreen';
 import ExerciseDetailScreen from './src/screens/ExerciseDetailScreen';
+import PaymentResultScreen from './src/screens/PaymentResultScreen';
 import AuthScreen from './src/screens/AuthScreen';
 import LogSheet from './src/components/LogSheet';
 import AccountSheet from './src/components/AccountSheet';
@@ -16,12 +18,14 @@ import { supabase } from './src/lib/supabase';
 import { accountLabel } from './src/lib/auth';
 import { getExercise } from './src/lib/db';
 import { summarizeWorkout } from './src/lib/coach';
+import { clearPaymentRoute, readPaymentRoute } from './src/lib/payments';
 import { colors, gradients } from './src/theme';
 
 const TABS = [
   { key: 'today', label: 'Today', icon: '⌂' },
   { key: 'plan', label: 'Plan', icon: '▤' },
   { key: 'library', label: 'Exercises', icon: '≣' },
+  { key: 'courses', label: 'Courses', icon: '🎓' },
   { key: 'progress', label: 'Progress', icon: '📈' },
 ];
 
@@ -64,6 +68,9 @@ export default function App() {
   const [attempt, setAttempt] = useState(0);
   const [coaching, setCoaching] = useState(null); // { id, error } while a summary is in flight
   const [account, setAccount] = useState(false);
+  // Set when MyFatoorah has just sent the buyer back to /pay/success/<ref> or
+  // /pay/error/<ref>. Read once on boot — the redirect is a full page load.
+  const [payRoute, setPayRoute] = useState(readPaymentRoute);
 
   useEffect(() => {
     let alive = true;
@@ -134,10 +141,26 @@ export default function App() {
       .finally(() => setReload((n) => n + 1));
   }, []);
 
+  // Leaving the receipt drops the /pay/... path so a reload doesn't land back
+  // on it, and refreshes Courses with whatever the webhook has written by now.
+  const leavePayment = useCallback(() => {
+    clearPaymentRoute();
+    setPayRoute(null);
+    setTab('courses');
+    setReload((n) => n + 1);
+  }, []);
+
   const body = () => {
     if (session === undefined) {
       return <ActivityIndicator color={colors.primary} style={{ flex: 1 }} />;
     }
+
+    // Shown ahead of the auth gate: a buyer coming back from the gateway should
+    // see what happened to their money even if their session has lapsed.
+    if (payRoute) {
+      return <PaymentResultScreen route={payRoute} session={session} onDone={leavePayment} />;
+    }
+
     // Only a failed session lookup is an error worth a retry screen; simply
     // being signed out is the normal path to the sign-in form.
     if (!session) {
@@ -176,6 +199,7 @@ export default function App() {
           )}
           {tab === 'plan' && <PlanScreen onOpenExercise={openExercise} />}
           {tab === 'library' && <LibraryScreen onOpenExercise={openExercise} />}
+          {tab === 'courses' && <CoursesScreen reloadSignal={reload} />}
           {tab === 'progress' && <ProgressScreen reloadSignal={reload} onOpenExerciseId={openExerciseId} />}
         </View>
         <BottomNav tab={tab} setTab={setTab} />

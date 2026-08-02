@@ -8,6 +8,7 @@ Log workouts (sets · reps · weight), plan your weekly split, and watch your pr
 - **Weekly Plan** — build training days (Push / Pull / Legs / Upper / Lower / Full Body) and stack exercises with target sets × reps.
 - **Exercises** — a curated library with step-by-step technique, coaching cues, and **common mistakes → how to fix them**. Filter by muscle group, split day, and equipment.
 - **Progress** — filter your history by **exercise type, date range, and split day**. See per-exercise progress status (progressing / plateaued / new), auto-detected personal records, a mini progress chart, and a full timeline.
+- **Courses** — pre-planned training blocks you can buy. One tap opens a MyFatoorah invoice, and the gateway's webhook is the only thing that can mark a booking paid.
 - **SARGE** — every workout you save is sent to a Supabase edge function where an AI drill instructor reads your numbers and tells you what they're worth. Shown under the entry in Recent activity and the Progress timeline.
 
 ## SARGE, the AI training partner (edge function)
@@ -92,6 +93,104 @@ abandons it. Converting a guest into a real account in place (keeping their hist
 mean calling `supabase.auth.updateUser({ email, password })` on the anonymous session —
 not wired up yet.
 
+## Courses & payments (MyFatoorah)
+
+The **Courses** tab sells pre-planned training blocks. The whole flow is four moving
+parts, and the app is trusted with none of the money-shaped decisions:
+
+```
+Courses tab  →  create-payment (edge fn)  →  MyFatoorah invoice  →  buyer pays
+                        │                                              │
+                   bookings row                              payment-webhook (edge fn)
+                 payment_status='awaiting_payment'          payment_status='paid'/'failed'
+                                                                       │
+                                     /pay/success/<ref>  ←  buyer redirected back
+```
+
+**Demo phase.** Everything points at MyFatoorah's sandbox, `https://apitest.myfatoorah.com`.
+No real money moves. Prices are in **KWD**, a three-decimal currency — `12.500` is twelve
+and a half dinars.
+
+### The pieces
+
+- `src/screens/CoursesScreen.js` — the catalogue and the Pay button.
+- `src/lib/payments.js` — course/booking reads, `startCoursePayment()`, and the
+  `/pay/...` route parsing.
+- `supabase/functions/create-payment/` — reads the price from the `courses` table,
+  writes a `bookings` row, calls MyFatoorah `POST /v2/SendPayment`, returns `InvoiceURL`.
+- `supabase/functions/payment-webhook/` — receives MyFatoorah's event and sets
+  `payment_status`. **The only thing in the system that can.**
+- `src/screens/PaymentResultScreen.js` — the success and error pages.
+
+### Why the client can't cheat
+
+Three separate things would each have to fail before someone could enrol for free:
+
+1. **The price is never sent by the client.** `create-payment` takes a `courseId` and
+   looks the amount up server-side.
+2. **`payment_status` is service-role-only.** `anon` and `authenticated` hold `SELECT`
+   and nothing else on `bookings`, there is no `UPDATE` policy, and a `BEFORE UPDATE`
+   trigger raises `insufficient_privilege` if any role other than the service role
+   changes the column — so a future migration that accidentally grants `UPDATE` still
+   can't open the door.
+3. **The webhook doesn't believe its own request body.** It verifies the
+   `MyFatoorah-Signature` HMAC, then re-reads the status from
+   `POST /v2/getPaymentStatus` and decides from *that*. A forged "Paid" event for a real
+   unpaid invoice leaves the booking at `awaiting_payment`.
+
+That third check matters more than it looks: an earlier version of the webhook let the
+body's `Transaction.Status` fill in when the API response had no transactions yet, and a
+forged event marked a booking paid. Confirmed data and body data are now never mixed —
+whichever source is in use supplies *every* field.
+
+### `bookings.payment_status`
+
+| Value | Set by | Meaning |
+| --- | --- | --- |
+| `pending` | `create-payment` | Row written, invoice not opened yet |
+| `awaiting_payment` | `create-payment` | Invoice is live, buyer sent to checkout |
+| `paid` | `payment-webhook` | MyFatoorah's API confirmed the payment. Terminal — never walked back |
+| `failed` | either | Invoice refused, or the payment failed / was cancelled |
+| `expired` | `payment-webhook` | The invoice timed out unpaid |
+
+### Registering the webhook — a portal step, not an API call
+
+**MyFatoorah registers webhooks once in the dashboard.** There is no per-charge webhook
+parameter (`SendPayment` has `CallBackUrl`/`ErrorUrl`, which are *browser redirects*, not
+server-to-server calls) and no API that can set the URL — `/v2/GetWebhooks` only reads
+delivery logs. So this step has to be done by hand:
+
+1. Log into the MyFatoorah portal → **Integration Settings → Webhook Settings**
+2. Enable the webhook feature
+3. Endpoint URL:
+   `https://yijxsityqkuchmjzpggi.supabase.co/functions/v1/payment-webhook`
+4. Event types: **Payment status changed** (event 1)
+5. Webhook version: **V2** (V1 payloads are handled too), and configure retries
+6. Enable the **secret key** option and copy the key
+7. Save
+
+Then set the key on Supabase (Project Settings → Edge Functions → Secrets):
+
+| Secret | Needed? | Notes |
+| --- | --- | --- |
+| `MYFATOORAH_WEBHOOK_SECRET` | **Yes, before launch** | Without it the webhook logs a warning and leans entirely on the API read-back |
+| `MYFATOORAH_API_KEY` | Recommended | Falls back to MyFatoorah's published sandbox token |
+| `MYFATOORAH_BASE_URL` | On go-live | Defaults to `https://apitest.myfatoorah.com`; use the live host for your country |
+| `PUBLIC_SITE_URL` / `PAYMENT_ALLOWED_ORIGINS` | Optional | Return-URL allow-list. Unrecognised origins are dropped, so the invoice can't be turned into an open redirect |
+
+**The catch with the shared sandbox token.** The default key is MyFatoorah's *public*
+demo account — you don't own its portal, so you cannot register a webhook against it.
+Invoices open and the redirect pages work, but nothing will ever call `payment-webhook`.
+To see the full loop, register your own test account at
+<https://registertest.myfatoorah.com/en/>, set `MYFATOORAH_API_KEY` to its key, and
+configure the webhook there.
+
+Deploy after edits:
+
+```bash
+npx supabase functions deploy create-payment payment-webhook --project-ref yijxsityqkuchmjzpggi
+```
+
 ## Data & privacy
 
 - Storage is **Supabase (cloud)** — plans and logs are backed up server-side.
@@ -115,9 +214,13 @@ Config lives in `.env` (copy from `.env.example`). The Supabase URL and publisha
 - `src/components/AccountSheet.js` — who you're signed in as, and log out
 - `src/lib/db.js` — all data access (exercises, plan, logs)
 - `src/lib/coach.js` — calls the `workout-summary` edge function and saves its reply
+- `src/lib/payments.js` — courses, bookings, checkout, and `/pay/...` route parsing
 - `supabase/functions/workout-summary/` — the edge function (Deno + OpenRouter)
+- `supabase/functions/create-payment/` — opens a MyFatoorah invoice for one course
+- `supabase/functions/payment-webhook/` — the only writer of `bookings.payment_status`
+- `supabase/migrations/` — schema as applied (courses, bookings, RLS)
 - `src/lib/metrics.js` — volume, estimated 1RM, PR detection, progress status
-- `src/screens/` — Today, Plan, Library, ExerciseDetail, Progress
+- `src/screens/` — Today, Plan, Library, Courses, ExerciseDetail, Progress, PaymentResult
 - `src/components/` — Button, Chip, Tag, ExerciseRow, ExercisePicker, LogSheet
 
 ## Database
