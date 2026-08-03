@@ -96,9 +96,22 @@ function signatureCandidates(body: Record<string, any>) {
 }
 
 async function signatureIsValid(body: Record<string, any>, header: string) {
-  for (const candidate of signatureCandidates(body)) {
+  const candidates = signatureCandidates(body);
+  for (const candidate of candidates) {
     if (timingSafeEqual(await hmacSha256Base64(MF_WEBHOOK_SECRET, candidate), header)) return true;
   }
+  // Every guess at the canonical string missed. That is either a forgery or a
+  // field order this code hasn't got right — and the two are indistinguishable
+  // from here, so log what was tried and let the caller be rejected. The
+  // candidates are built from the payload, which is already stored on the
+  // booking, so this leaks nothing the database doesn't hold. The secret and
+  // the computed digests are deliberately not logged.
+  console.error(
+    'Signature mismatch. Tried these canonical strings:',
+    JSON.stringify(candidates),
+    '| header:',
+    header,
+  );
   return false;
 }
 
