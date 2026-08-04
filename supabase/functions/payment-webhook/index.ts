@@ -102,21 +102,17 @@ function signatureCandidates(body: Record<string, any>) {
 async function signatureIsValid(body: Record<string, any>, header: string) {
   const candidates = signatureCandidates(body);
   for (const candidate of candidates) {
-    if (timingSafeEqual(await hmacSha256Base64(MF_WEBHOOK_SECRET, candidate), header)) return true;
+    if (timingSafeEqual(await hmacSha256Base64(MF_WEBHOOK_SECRET, candidate), header)) {
+      return { valid: true, candidates };
+    }
   }
   // Every guess at the canonical string missed. That is either a forgery or a
-  // field order this code hasn't got right — and the two are indistinguishable
-  // from here, so log what was tried and let the caller be rejected. The
-  // candidates are built from the payload, which is already stored on the
-  // booking, so this leaks nothing the database doesn't hold. The secret and
-  // the computed digests are deliberately not logged.
-  console.error(
-    'Signature mismatch. Tried these canonical strings:',
-    JSON.stringify(candidates),
-    '| header:',
-    header,
-  );
-  return false;
+  // field order this code hasn't got right, and the two are indistinguishable
+  // from here — so the caller is rejected either way, and what was tried is
+  // recorded so the real format can be worked out. The candidates come from the
+  // payload itself; the secret and the computed digests are never stored.
+  console.error('Signature mismatch. Tried:', JSON.stringify(candidates), '| header:', header);
+  return { valid: false, candidates };
 }
 
 // The authoritative read. Whatever arrived in the request body, this is what
@@ -167,12 +163,23 @@ Deno.serve(async (req: Request) => {
     return json({ error: 'Body must be JSON.' }, 400);
   }
 
+  const supabaseUrl = Deno.env.get('SUPABASE_URL');
+  const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+  if (!supabaseUrl || !serviceKey) return json({ error: 'Missing Supabase service credentials.' }, 500);
+  const admin = createClient(supabaseUrl, serviceKey, { auth: { persistSession: false } });
+
   // ------------------------------------------------------- check 1: signature
   const header = req.headers.get('MyFatoorah-Signature') ?? '';
   if (MF_WEBHOOK_SECRET) {
     if (!header) return json({ error: 'Missing MyFatoorah-Signature header.' }, 401);
-    if (!(await signatureIsValid(body, header))) {
-      console.error('Rejected a webhook with a bad signature');
+    const { valid, candidates } = await signatureIsValid(body, header);
+    if (!valid) {
+      // Kept so the canonical string can be reconstructed from a real event —
+      // see the webhook_signature_failures table.
+      await admin
+        .from('webhook_signature_failures')
+        .insert({ header, candidates, body })
+        .then(({ error }) => error && console.error('Could not record the mismatch', error.message));
       return json({ error: 'Signature does not match.' }, 401);
     }
   } else {
@@ -251,11 +258,6 @@ Deno.serve(async (req: Request) => {
 
   const status = classify(invoiceStatus, transactionStatus);
   const resolvedInvoiceId = (confirmed ? str(confirmed.InvoiceId) : '') || invoiceId;
-
-  const supabaseUrl = Deno.env.get('SUPABASE_URL');
-  const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
-  if (!supabaseUrl || !serviceKey) return json({ error: 'Missing Supabase service credentials.' }, 500);
-  const admin = createClient(supabaseUrl, serviceKey, { auth: { persistSession: false } });
 
   const query = admin.from('bookings').select('id, payment_status, reference').limit(1);
   const { data: booking, error: lookupError } = await (reference
