@@ -216,10 +216,12 @@ Deno.serve(async (req: Request) => {
     Data?: { InvoiceId?: number | string; InvoiceURL?: string };
   } | null = null;
   let transportError = '';
+  let fellBack = false;
 
   try {
-    const { payload, status } = await mfPost('/v2/SendPayment', invoiceRequest);
+    const { payload, status, usedSandboxFallback } = await mfPost('/v2/SendPayment', invoiceRequest);
     mfResponse = payload;
+    fellBack = usedSandboxFallback;
     if (!mfResponse) transportError = `MyFatoorah returned a non-JSON response (HTTP ${status}).`;
   } catch (e) {
     transportError = `Could not reach MyFatoorah: ${String(e)}`;
@@ -256,5 +258,18 @@ Deno.serve(async (req: Request) => {
     amount,
     currency,
     course: { id: course.id, slug: course.slug, title: course.title },
+    // Present only while the configured key is being refused, so it is obvious
+    // the invoice went onto the shared sandbox account rather than yours. The
+    // fingerprint is length plus the last four characters — enough to tell one
+    // key from another, never enough to be one. Disappears once the key works.
+    ...(fellBack
+      ? {
+          sandboxFallback: {
+            reason: 'MYFATOORAH_API_KEY was refused; used the public test token instead.',
+            keyLength: MF_KEY.length,
+            keyEnds: MF_KEY.slice(-4),
+          },
+        }
+      : {}),
   });
 });
