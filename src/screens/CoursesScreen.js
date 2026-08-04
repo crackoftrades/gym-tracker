@@ -9,7 +9,6 @@ import {
   listCourses,
   listMyBookings,
   openPaymentUrl,
-  reconcileBookings,
   startCoursePayment,
 } from '../lib/payments';
 import { colors, gradients, radius, shadow, splitColor, spacing } from '../theme';
@@ -103,17 +102,12 @@ export default function CoursesScreen({ reloadSignal }) {
   const [busyId, setBusyId] = useState(null);
   const [payError, setPayError] = useState({});
 
+  // Read only. Whatever `payment-webhook` has written is what this shows —
+  // there is no client path that could move a booking forward.
   const load = useCallback(async () => {
     const [courseRows, bookingRows] = await Promise.all([listCourses(), listMyBookings()]);
     setCourses(courseRows);
     setBookings(bookingsByCourse(bookingRows));
-
-    // Anyone who paid and then closed the tab still has an `awaiting_payment`
-    // row. Ask the gateway about those and re-read if anything moved, so the
-    // list is right without the buyer having to do anything.
-    if (await reconcileBookings(bookingRows).catch(() => false)) {
-      setBookings(bookingsByCourse(await listMyBookings()));
-    }
   }, []);
 
   useEffect(() => {

@@ -276,10 +276,20 @@ Deno.serve(async (req: Request) => {
     return json({ error: 'No booking matches this payment.', reference, invoiceId: resolvedInvoiceId }, 404);
   }
 
-  // A paid booking is final. Later events only add to the audit trail.
-  if (booking.payment_status === 'paid' && status !== 'paid') {
+  // `paid` is terminal, so every later delivery for this booking is a no-op —
+  // including a repeat of the same `paid` event. MyFatoorah retries up to five
+  // times, and a retry must not restamp `paid_at` or re-clear `failure_reason`;
+  // the row a support ticket is read from should say when the money actually
+  // arrived, not when the gateway last mentioned it. Only the audit trail moves.
+  if (booking.payment_status === 'paid') {
     await admin.from('bookings').update({ last_event: body }).eq('id', booking.id);
-    return json({ ok: true, reference: booking.reference, paymentStatus: 'paid', note: 'Already paid.' });
+    return json({
+      ok: true,
+      reference: booking.reference,
+      paymentStatus: 'paid',
+      duplicate: true,
+      note: 'Already paid — event recorded, booking unchanged.',
+    });
   }
 
   const update: Record<string, unknown> = {

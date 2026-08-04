@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from 'react-native';
 import Button from '../components/Button';
-import { confirmPayment, getBooking } from '../lib/payments';
+import { getBooking } from '../lib/payments';
 import { colors, radius, shadow, spacing } from '../theme';
 
 // Where MyFatoorah drops the buyer once checkout is over: /pay/success/<ref>
@@ -13,8 +13,11 @@ import { colors, radius, shadow, spacing } from '../theme';
 // webhook usually lands first; when it hasn't, this polls for a few seconds
 // rather than claiming an outcome the database doesn't have yet.
 
-const POLL_MS = 2000;
-const POLL_LIMIT = 12; // ~24 seconds
+// The webhook usually lands within a couple of seconds of the buyer being
+// redirected here, but MyFatoorah retries a failed delivery on its own
+// schedule, so give it a wider window before falling back to "still confirming".
+const POLL_MS = 3000;
+const POLL_LIMIT = 20; // ~60 seconds
 
 const VIEWS = {
   paid: {
@@ -87,10 +90,8 @@ export default function PaymentResultScreen({ route, session, onDone }) {
 
     const tick = async () => {
       try {
-        // Ask the gateway first, then read what got written. Without this the
-        // page would wait on a webhook that never arrives when the project is
-        // running on MyFatoorah's shared sandbox token.
-        await confirmPayment(reference).catch(() => {});
+        // Read only. This page never settles a payment — it waits for
+        // `payment-webhook` to write the booking and reports what it finds.
         const row = await getBooking(reference);
         if (!alive) return;
         if (row) setBooking(row);

@@ -1,30 +1,27 @@
 import 'jsr:@supabase/functions-js/edge-runtime.d.ts';
 import { createClient } from 'jsr:@supabase/supabase-js@2';
 
-// Asks MyFatoorah what happened to one booking, and writes the answer.
+// Reports one booking's payment status. It cannot change it.
 //
-// `payment-webhook` is the same job driven by a push; this is the pull. It
-// exists because MyFatoorah registers webhooks per merchant account in the
-// portal, so a project running on the shared public sandbox token — which
-// belongs to MyFatoorah, not to us — can never receive one. Polling
-// `getPaymentStatus` closes that loop with no portal setup at all.
+// This used to settle payments by polling MyFatoorah, because the project ran
+// on the shared public sandbox token and no webhook could ever be registered
+// against it. That is no longer true: `payment-webhook` receives MyFatoorah's
+// signed events and is now the single writer of `payment_status`.
 //
-// It is no weaker than the webhook, because the webhook doesn't trust its
-// request body either: both routes end up asking MyFatoorah's own API and
-// writing what it says. The caller only names one of their own bookings; they
-// have no say in the outcome.
+// The write path is deliberately gone rather than the whole function, so a
+// browser still running an older bundle degrades to a harmless read instead of
+// erroring. Keeping it read-only also means there is exactly one way a booking
+// can be marked paid — a signed event from the gateway — with no second route
+// to audit or secure.
 //
-// Once a real webhook is registered this stays useful — it's what the success
-// page falls back on if an event is delayed or dropped.
+// The app no longer calls this. It is kept as a support tool: given a
+// reference, it says what the database holds and what MyFatoorah says, so a
+// disagreement between the two is visible without database access.
 
 const MF_BASE = (Deno.env.get('MYFATOORAH_BASE_URL') ?? 'https://apitest.myfatoorah.com').replace(/\/+$/, '');
 const MF_DEMO_KEY =
   'SK_KWT_vVZlnnAqu8jRByOWaRPNId4ShzEDNt256dvnjebuyzo52dXjAfRx2ixW5umjWSUx';
 const MF_KEY = Deno.env.get('MYFATOORAH_API_KEY')?.trim() || MF_DEMO_KEY;
-
-// Sandbox only. On a live host a refused key must fail loudly rather than fall
-// through to somebody else's account. Kept in step with `create-payment`, so an
-// invoice opened on the fallback token can still be read back here.
 const IS_SANDBOX = MF_BASE.includes('apitest.myfatoorah.com');
 
 const CORS = {
@@ -65,17 +62,6 @@ async function fetchPaymentStatus(key: string, keyType: 'InvoiceId' | 'CustomerR
   return payload?.IsSuccess ? (payload.Data as Record<string, any>) : null;
 }
 
-// MyFatoorah spells the success transaction status "Succss" in places, so match
-// on a prefix rather than an exact string. Kept in step with `payment-webhook`.
-function classify(invoiceStatus: string, transactionStatus: string) {
-  if (/^succ/i.test(transactionStatus) || /^paid$/i.test(invoiceStatus)) return 'paid';
-  if (/expir/i.test(invoiceStatus) || /expir/i.test(transactionStatus)) return 'expired';
-  if (/fail|cancel|declin|reject/i.test(invoiceStatus) || /fail|cancel|declin|reject/i.test(transactionStatus)) {
-    return 'failed';
-  }
-  return 'awaiting_payment';
-}
-
 Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS });
   if (req.method !== 'POST') return json({ error: 'Use POST.' }, 405);
@@ -103,7 +89,7 @@ Deno.serve(async (req: Request) => {
   // Scoped to the caller: you can only ask about your own booking.
   const { data: booking, error: lookupError } = await admin
     .from('bookings')
-    .select('id, reference, payment_status, invoice_id')
+    .select('reference, payment_status, invoice_id, paid_at')
     .eq('reference', reference)
     .eq('user_id', user.id)
     .maybeSingle();
@@ -111,45 +97,30 @@ Deno.serve(async (req: Request) => {
   if (lookupError) return json({ error: `Lookup failed: ${lookupError.message}` }, 500);
   if (!booking) return json({ error: 'No such booking on your account.' }, 404);
 
-  // Already settled — nothing to ask, and `paid` is never walked back.
-  if (['paid', 'failed', 'expired'].includes(booking.payment_status)) {
-    return json({ reference: booking.reference, paymentStatus: booking.payment_status, checked: false });
-  }
-
-  let confirmed: Record<string, any> | null = null;
+  // What MyFatoorah says, purely for comparison. Nothing is written either way.
+  let gateway: { invoiceStatus: string; transactionStatus: string } | null = null;
   try {
-    if (booking.invoice_id) confirmed = await fetchPaymentStatus(booking.invoice_id, 'InvoiceId');
-    if (!confirmed) confirmed = await fetchPaymentStatus(booking.reference, 'CustomerReference');
+    const confirmed =
+      (booking.invoice_id && (await fetchPaymentStatus(booking.invoice_id, 'InvoiceId'))) ||
+      (await fetchPaymentStatus(booking.reference, 'CustomerReference'));
+    if (confirmed) {
+      const txs = Array.isArray(confirmed.InvoiceTransactions) ? confirmed.InvoiceTransactions : [];
+      const latest = (txs[txs.length - 1] ?? {}) as Record<string, any>;
+      gateway = {
+        invoiceStatus: str(confirmed.InvoiceStatus),
+        transactionStatus: str(latest.TransactionStatus),
+      };
+    }
   } catch (e) {
     console.error('Could not reach MyFatoorah', String(e));
   }
 
-  if (!confirmed) {
-    return json({ reference: booking.reference, paymentStatus: booking.payment_status, checked: false });
-  }
-
-  const txs = Array.isArray(confirmed.InvoiceTransactions) ? confirmed.InvoiceTransactions : [];
-  const latest = (txs[txs.length - 1] ?? {}) as Record<string, any>;
-  const status = classify(str(confirmed.InvoiceStatus), str(latest.TransactionStatus));
-
-  if (status === booking.payment_status) {
-    return json({ reference: booking.reference, paymentStatus: status, checked: true });
-  }
-
-  const update: Record<string, unknown> = {
-    payment_status: status,
-    failure_reason: status === 'paid' ? null : str(latest.Error).slice(0, 500) || null,
-  };
-  if (str(confirmed.InvoiceId)) update.invoice_id = str(confirmed.InvoiceId);
-  if (str(latest.PaymentId)) update.payment_id = str(latest.PaymentId);
-  if (status === 'paid') update.paid_at = new Date().toISOString();
-
-  const { error: updateError } = await admin.from('bookings').update(update).eq('id', booking.id);
-  if (updateError) {
-    console.error('Could not update the booking', updateError.message);
-    return json({ error: 'Could not update the booking.' }, 500);
-  }
-
-  console.log('Booking reconciled by poll', { reference: booking.reference, status });
-  return json({ reference: booking.reference, paymentStatus: status, checked: true });
+  return json({
+    reference: booking.reference,
+    paymentStatus: booking.payment_status,
+    paidAt: booking.paid_at,
+    gateway,
+    readOnly: true,
+    note: 'payment_status is written only by the payment-webhook function.',
+  });
 });

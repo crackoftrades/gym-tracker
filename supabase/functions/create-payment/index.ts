@@ -26,6 +26,10 @@ const MF_KEY = Deno.env.get('MYFATOORAH_API_KEY')?.trim() || MF_DEMO_KEY;
 // account.
 const IS_SANDBOX = MF_BASE.includes('apitest.myfatoorah.com');
 
+// How long an unpaid invoice is handed back instead of a new one being opened.
+// MyFatoorah keeps an invoice live for two days; a day leaves margin.
+const REUSE_WINDOW_MS = 24 * 60 * 60 * 1000;
+
 const isAuthFailure = (payload: { IsSuccess?: boolean; Message?: string } | null) =>
   payload?.IsSuccess === false && /token is not valid|expired/i.test(payload?.Message ?? '');
 
@@ -166,9 +170,43 @@ Deno.serve(async (req: Request) => {
   }
 
   const origin = safeOrigin(payload.origin);
-  const reference = newReference();
   const amount = Number(course.price);
   const currency = String(course.currency || 'KWD');
+
+  // Double-tap guard. A slow network, an impatient second tap, or a buyer who
+  // backed out of checkout and pressed Pay again would otherwise open a fresh
+  // MyFatoorah invoice every time, leaving a trail of abandoned invoices and —
+  // worse — a buyer who could pay two of them for the same course.
+  //
+  // So an invoice that is still live for this member and this course is handed
+  // back as-is instead. The gateway holds it open for two days; a day is a safe
+  // margin inside that, after which a new one is cheaper than a stale link.
+  const { data: openInvoice } = await admin
+    .from('bookings')
+    .select('id, reference, invoice_id, payment_url, created_at')
+    .eq('user_id', user.id)
+    .eq('course_id', course.id)
+    .eq('payment_status', 'awaiting_payment')
+    .not('payment_url', 'is', null)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (openInvoice && Date.now() - new Date(openInvoice.created_at).getTime() < REUSE_WINDOW_MS) {
+    console.log('Reusing the open invoice', { reference: openInvoice.reference });
+    return json({
+      paymentUrl: openInvoice.payment_url,
+      reference: openInvoice.reference,
+      invoiceId: openInvoice.invoice_id,
+      bookingId: openInvoice.id,
+      amount,
+      currency,
+      course: { id: course.id, slug: course.slug, title: course.title },
+      reused: true,
+    });
+  }
+
+  const reference = newReference();
 
   // Written before the gateway is called: an invoice with no booking behind it
   // is unreconcilable, a booking with no invoice is just an abandoned cart.
