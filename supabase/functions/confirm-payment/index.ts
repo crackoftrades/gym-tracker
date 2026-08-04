@@ -20,7 +20,12 @@ import { createClient } from 'jsr:@supabase/supabase-js@2';
 const MF_BASE = (Deno.env.get('MYFATOORAH_BASE_URL') ?? 'https://apitest.myfatoorah.com').replace(/\/+$/, '');
 const MF_DEMO_KEY =
   'SK_KWT_vVZlnnAqu8jRByOWaRPNId4ShzEDNt256dvnjebuyzo52dXjAfRx2ixW5umjWSUx';
-const MF_KEY = Deno.env.get('MYFATOORAH_API_KEY') ?? MF_DEMO_KEY;
+const MF_KEY = Deno.env.get('MYFATOORAH_API_KEY')?.trim() || MF_DEMO_KEY;
+
+// Sandbox only. On a live host a refused key must fail loudly rather than fall
+// through to somebody else's account. Kept in step with `create-payment`, so an
+// invoice opened on the fallback token can still be read back here.
+const IS_SANDBOX = MF_BASE.includes('apitest.myfatoorah.com');
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -37,17 +42,26 @@ function json(body: unknown, status = 200) {
 
 const str = (v: unknown) => (v == null ? '' : String(v));
 
+const isAuthFailure = (payload: { IsSuccess?: boolean; Message?: string } | null) =>
+  payload?.IsSuccess === false && /token is not valid|expired/i.test(payload?.Message ?? '');
+
 async function fetchPaymentStatus(key: string, keyType: 'InvoiceId' | 'CustomerReference') {
-  const res = await fetch(`${MF_BASE}/v2/getPaymentStatus`, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${MF_KEY}`,
-      'Content-Type': 'application/json',
-      Accept: 'application/json',
-    },
-    body: JSON.stringify({ Key: key, KeyType: keyType }),
-  });
-  const payload = await res.json().catch(() => null);
+  const call = (apiKey: string) =>
+    fetch(`${MF_BASE}/v2/getPaymentStatus`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+      },
+      body: JSON.stringify({ Key: key, KeyType: keyType }),
+    });
+
+  let payload = await (await call(MF_KEY)).json().catch(() => null);
+  if (isAuthFailure(payload) && MF_KEY !== MF_DEMO_KEY && IS_SANDBOX) {
+    console.warn('MYFATOORAH_API_KEY was rejected by the sandbox — retrying on the public test token.');
+    payload = await (await call(MF_DEMO_KEY)).json().catch(() => null);
+  }
   return payload?.IsSuccess ? (payload.Data as Record<string, any>) : null;
 }
 

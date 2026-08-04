@@ -206,6 +206,22 @@ Then set the key on Supabase (Project Settings → Edge Functions → Secrets):
 | `MYFATOORAH_BASE_URL` | On go-live | Defaults to `https://apitest.myfatoorah.com`; use the live host for your country |
 | `PUBLIC_SITE_URL` / `PAYMENT_ALLOWED_ORIGINS` | Optional | Return-URL allow-list. Unrecognised origins are dropped, so the invoice can't be turned into an open redirect |
 
+### The sandbox never breaks on a bad key
+
+A `registertest` account has to be activated by MyFatoorah support before its API
+keys authenticate. Until that happens every key it issues comes back
+`"The token is not valid or expired!"` — which would otherwise take the entire demo
+down while you wait on an email.
+
+So on the **sandbox host only**, all three functions retry once with the built-in
+public test token when the configured key is refused, and log a warning. The demo
+keeps working, and the real key starts being used the moment it becomes valid —
+no redeploy, nothing to remember to switch back.
+
+This is gated on `MF_BASE` pointing at `apitest.myfatoorah.com`. On a live host a
+refused key fails loudly, as it must: quietly billing through a different merchant
+account would be far worse than an outage.
+
 Deploy after edits:
 
 ```bash

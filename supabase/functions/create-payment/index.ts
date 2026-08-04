@@ -19,21 +19,48 @@ const MF_BASE = (Deno.env.get('MYFATOORAH_BASE_URL') ?? 'https://apitest.myfatoo
 // setup. Set MYFATOORAH_API_KEY on the project to use your own test account.
 const MF_DEMO_KEY =
   'SK_KWT_vVZlnnAqu8jRByOWaRPNId4ShzEDNt256dvnjebuyzo52dXjAfRx2ixW5umjWSUx';
-const MF_KEY_RAW = Deno.env.get('MYFATOORAH_API_KEY');
-const MF_KEY = MF_KEY_RAW ?? MF_DEMO_KEY;
+const MF_KEY = Deno.env.get('MYFATOORAH_API_KEY')?.trim() || MF_DEMO_KEY;
 
-// Enough to tell a mis-pasted secret from a genuinely rejected key, without
-// putting the key in the logs. `length` catches truncation, `trimmedLength`
-// catches the stray newline or space that silently breaks a Bearer header, and
-// the masked ends confirm it's the key you think it is.
-function keyShape() {
-  if (MF_KEY_RAW == null) return { source: 'built-in sandbox token' };
+// True only for MyFatoorah's sandbox host. Gates the fallback below — on a live
+// host a rejected key must fail loudly, never quietly bill through some other
+// account.
+const IS_SANDBOX = MF_BASE.includes('apitest.myfatoorah.com');
+
+const isAuthFailure = (payload: { IsSuccess?: boolean; Message?: string } | null) =>
+  payload?.IsSuccess === false && /token is not valid|expired/i.test(payload?.Message ?? '');
+
+// Posts to MyFatoorah, and if the configured key is refused on the sandbox,
+// retries once with the built-in public test token.
+//
+// A `registertest` account has to be activated by MyFatoorah support before its
+// keys authenticate, and until that happens every key it issues is rejected —
+// which would otherwise take the whole demo down. This keeps the sandbox
+// working through that wait, and starts using the real key the moment it
+// becomes valid, with no redeploy and nothing to remember to switch back.
+async function mfPost(path: string, body: unknown) {
+  const call = (key: string) =>
+    fetch(`${MF_BASE}${path}`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${key}`,
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+      },
+      body: JSON.stringify(body),
+    });
+
+  const res = await call(MF_KEY);
+  const payload = await res.json().catch(() => null);
+  if (!isAuthFailure(payload) || MF_KEY === MF_DEMO_KEY || !IS_SANDBOX) {
+    return { payload, status: res.status, usedSandboxFallback: false };
+  }
+
+  console.warn('MYFATOORAH_API_KEY was rejected by the sandbox — retrying on the public test token.');
+  const retry = await call(MF_DEMO_KEY);
   return {
-    source: 'MYFATOORAH_API_KEY',
-    length: MF_KEY_RAW.length,
-    trimmedLength: MF_KEY_RAW.trim().length,
-    starts: MF_KEY_RAW.trim().slice(0, 7),
-    ends: MF_KEY_RAW.trim().slice(-4),
+    payload: await retry.json().catch(() => null),
+    status: retry.status,
+    usedSandboxFallback: true,
   };
 }
 
@@ -191,17 +218,9 @@ Deno.serve(async (req: Request) => {
   let transportError = '';
 
   try {
-    const res = await fetch(`${MF_BASE}/v2/SendPayment`, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${MF_KEY}`,
-        'Content-Type': 'application/json',
-        Accept: 'application/json',
-      },
-      body: JSON.stringify(invoiceRequest),
-    });
-    mfResponse = await res.json().catch(() => null);
-    if (!mfResponse) transportError = `MyFatoorah returned a non-JSON response (HTTP ${res.status}).`;
+    const { payload, status } = await mfPost('/v2/SendPayment', invoiceRequest);
+    mfResponse = payload;
+    if (!mfResponse) transportError = `MyFatoorah returned a non-JSON response (HTTP ${status}).`;
   } catch (e) {
     transportError = `Could not reach MyFatoorah: ${String(e)}`;
   }
@@ -219,11 +238,8 @@ Deno.serve(async (req: Request) => {
       .from('bookings')
       .update({ payment_status: 'failed', failure_reason: detail.slice(0, 500) })
       .eq('id', booking.id);
-    console.error('SendPayment failed', { reference, detail, base: MF_BASE, key: keyShape() });
-    // TEMPORARY: echoed so a rejected key can be diagnosed without shipping the
-    // key anywhere. Lengths and 7/4-character masked ends only — never the key
-    // itself. Remove once the gateway credentials are settled.
-    return json({ error: detail, reference, diag: { base: MF_BASE, key: keyShape() } }, 502);
+    console.error('SendPayment failed', { reference, detail, base: MF_BASE });
+    return json({ error: detail, reference }, 502);
   }
 
   const { error: updateError } = await admin
