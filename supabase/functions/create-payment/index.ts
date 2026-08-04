@@ -19,7 +19,23 @@ const MF_BASE = (Deno.env.get('MYFATOORAH_BASE_URL') ?? 'https://apitest.myfatoo
 // setup. Set MYFATOORAH_API_KEY on the project to use your own test account.
 const MF_DEMO_KEY =
   'SK_KWT_vVZlnnAqu8jRByOWaRPNId4ShzEDNt256dvnjebuyzo52dXjAfRx2ixW5umjWSUx';
-const MF_KEY = Deno.env.get('MYFATOORAH_API_KEY') ?? MF_DEMO_KEY;
+const MF_KEY_RAW = Deno.env.get('MYFATOORAH_API_KEY');
+const MF_KEY = MF_KEY_RAW ?? MF_DEMO_KEY;
+
+// Enough to tell a mis-pasted secret from a genuinely rejected key, without
+// putting the key in the logs. `length` catches truncation, `trimmedLength`
+// catches the stray newline or space that silently breaks a Bearer header, and
+// the masked ends confirm it's the key you think it is.
+function keyShape() {
+  if (MF_KEY_RAW == null) return { source: 'built-in sandbox token' };
+  return {
+    source: 'MYFATOORAH_API_KEY',
+    length: MF_KEY_RAW.length,
+    trimmedLength: MF_KEY_RAW.trim().length,
+    starts: MF_KEY_RAW.trim().slice(0, 7),
+    ends: MF_KEY_RAW.trim().slice(-4),
+  };
+}
 
 // The buyer comes back to one of our own pages after paying. The client sends
 // its origin so previews and localhost work, but an origin we don't recognise
@@ -203,8 +219,11 @@ Deno.serve(async (req: Request) => {
       .from('bookings')
       .update({ payment_status: 'failed', failure_reason: detail.slice(0, 500) })
       .eq('id', booking.id);
-    console.error('SendPayment failed', { reference, detail });
-    return json({ error: detail, reference }, 502);
+    console.error('SendPayment failed', { reference, detail, base: MF_BASE, key: keyShape() });
+    // TEMPORARY: echoed so a rejected key can be diagnosed without shipping the
+    // key anywhere. Lengths and 7/4-character masked ends only — never the key
+    // itself. Remove once the gateway credentials are settled.
+    return json({ error: detail, reference, diag: { base: MF_BASE, key: keyShape() } }, 502);
   }
 
   const { error: updateError } = await admin
