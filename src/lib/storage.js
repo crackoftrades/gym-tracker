@@ -2,6 +2,13 @@ import { supabase } from './supabase';
 
 export const PHOTO_BUCKET = 'progress-photos';
 
+// The bucket is private. A public bucket serves objects by URL regardless of the
+// object RLS policies, so every progress photo was permanently readable by
+// anyone holding the link — including after its workout log was deleted. Reads
+// now go through short-lived signed URLs, which puts them back under the
+// `<uid>/` policies that were already in place.
+const SIGNED_TTL_S = 60 * 60;
+
 const EXT_BY_MIME = {
   'image/jpeg': 'jpg',
   'image/jpg': 'jpg',
@@ -22,9 +29,45 @@ function base64ToBytes(base64) {
 }
 
 /**
- * Upload one picked image asset and return its public URL.
- * Storage RLS only lets a user write inside a folder named after their uid,
- * so every path is `<uid>/<file>`.
+ * The object path for a stored photo.
+ *
+ * `photo_url` used to hold a full public URL and now holds a bare object path,
+ * so rows written before the bucket went private still have to resolve.
+ * Anything else that looks like a URL points somewhere we don't serve.
+ */
+export function photoPath(value) {
+  if (!value) return null;
+  const marker = `/object/public/${PHOTO_BUCKET}/`;
+  const idx = value.indexOf(marker);
+  if (idx !== -1) return decodeURIComponent(value.slice(idx + marker.length));
+  return value.startsWith('http') ? null : value;
+}
+
+// Signed links are reused until they are close to expiring, so scrolling the log
+// list doesn't re-sign the same object on every render.
+const signedCache = new Map();
+
+export async function signedPhotoUrl(value) {
+  const path = photoPath(value);
+  if (!path) return null;
+
+  const cached = signedCache.get(path);
+  if (cached && cached.expiresAt > Date.now()) return cached.url;
+
+  const { data, error } = await supabase.storage.from(PHOTO_BUCKET).createSignedUrl(path, SIGNED_TTL_S);
+  if (error || !data?.signedUrl) return null;
+
+  // Retire the entry five minutes early so a link never expires mid-render.
+  signedCache.set(path, { url: data.signedUrl, expiresAt: Date.now() + (SIGNED_TTL_S - 300) * 1000 });
+  return data.signedUrl;
+}
+
+/**
+ * Upload one picked image asset and return its object path.
+ *
+ * Storage RLS only lets a user write inside a folder named after their uid, so
+ * every path is `<uid>/<file>`. The bucket also caps size and content type, so a
+ * tampered `mimeType` is refused by the server rather than trusted.
  */
 export async function uploadProgressPhoto(asset) {
   if (!asset?.base64) throw new Error('Could not read that image.');
@@ -43,17 +86,15 @@ export async function uploadProgressPhoto(asset) {
     .upload(path, base64ToBytes(asset.base64), { contentType, upsert: false });
   if (error) throw error;
 
-  const { data } = supabase.storage.from(PHOTO_BUCKET).getPublicUrl(path);
-  return data.publicUrl;
+  return path;
 }
 
-// Best-effort cleanup when a photo is removed before the log is saved, so
-// abandoned uploads don't pile up in the bucket.
-export async function deleteProgressPhoto(publicUrl) {
-  if (!publicUrl) return;
-  const marker = `/object/public/${PHOTO_BUCKET}/`;
-  const idx = publicUrl.indexOf(marker);
-  if (idx === -1) return;
-  const path = decodeURIComponent(publicUrl.slice(idx + marker.length));
+// Removes the stored object: when a photo is swapped or dropped before the log
+// is saved, and when a log is deleted — otherwise the image outlives the row
+// that pointed at it.
+export async function deleteProgressPhoto(value) {
+  const path = photoPath(value);
+  if (!path) return;
+  signedCache.delete(path);
   await supabase.storage.from(PHOTO_BUCKET).remove([path]);
 }

@@ -1,12 +1,13 @@
 import { useState } from 'react';
-import { ActivityIndicator, Image, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
+import ProgressPhoto from './ProgressPhoto';
 import { deleteProgressPhoto, uploadProgressPhoto } from '../lib/storage';
 import { colors, radius, spacing } from '../theme';
 
-// Pick one progress photo, upload it immediately, and hand the public URL up.
-// Uploading on pick (rather than on save) keeps the save path fast and lets the
-// user see the thumbnail before committing the log.
+// Pick one progress photo, upload it immediately, and hand the stored object
+// path up. Uploading on pick (rather than on save) keeps the save path fast and
+// lets the user see the thumbnail before committing the log.
 export default function PhotoField({ value, onChange, onError }) {
   const [busy, setBusy] = useState(false);
 
@@ -28,8 +29,8 @@ export default function PhotoField({ value, onChange, onError }) {
     setBusy(true);
     try {
       const previous = value;
-      const url = await uploadProgressPhoto(res.assets[0]);
-      onChange?.(url);
+      const path = await uploadProgressPhoto(res.assets[0]);
+      onChange?.(path);
       deleteProgressPhoto(previous).catch(() => {});
     } catch (e) {
       onError?.(String(e?.message || e));
@@ -50,7 +51,7 @@ export default function PhotoField({ value, onChange, onError }) {
 
       {value ? (
         <View style={styles.preview}>
-          <Image source={{ uri: value }} style={styles.thumb} resizeMode="cover" />
+          <ProgressPhoto value={value} style={styles.thumb} />
           <View style={styles.previewBody}>
             <Text style={styles.previewText} numberOfLines={1}>
               Photo attached

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import Chip from '../components/Chip';
+import ProgressPhoto from '../components/ProgressPhoto';
 import Tag from '../components/Tag';
 import { listLogs } from '../lib/db';
 import { CATEGORIES, COACH_NAME, DATE_RANGES, SPLIT_DAYS } from '../lib/constants';
@@ -193,7 +194,7 @@ export default function ProgressScreen({ reloadSignal, onOpenExerciseId }) {
           {logs.map((l) => (
             <View key={l.id} style={styles.logCard}>
               <View style={styles.logRow}>
-                {!!l.photo_url && <Image source={{ uri: l.photo_url }} style={styles.logThumb} resizeMode="cover" />}
+                {!!l.photo_url && <ProgressPhoto value={l.photo_url} style={styles.logThumb} />}
                 <View style={{ flex: 1 }}>
                   <View style={{ flexDirection: 'row', alignItems: 'center' }}>
                     <Text style={styles.logName} numberOfLines={1}>

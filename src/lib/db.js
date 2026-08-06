@@ -1,3 +1,4 @@
+import { deleteProgressPhoto } from './storage';
 import { supabase } from './supabase';
 
 async function uid() {
@@ -96,8 +97,17 @@ export async function logWorkout({ exercise, sets, notes, performedOn, photoUrl 
 }
 
 export async function deleteLog(id) {
+  // Read the photo first: once the row is gone there is nothing left pointing at
+  // the stored object, and an orphaned progress photo used to stay reachable
+  // for anyone who had ever held its link.
+  const { data } = await supabase.from('workout_logs').select('photo_url').eq('id', id).maybeSingle();
+
   const { error } = await supabase.from('workout_logs').delete().eq('id', id);
   if (error) throw error;
+
+  // Best-effort: the log is already gone, and a failed cleanup shouldn't surface
+  // as a failed delete.
+  if (data?.photo_url) await deleteProgressPhoto(data.photo_url).catch(() => {});
 }
 
 export async function listLogs({ category, splitDay, from, to } = {}) {
